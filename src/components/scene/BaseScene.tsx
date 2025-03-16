@@ -18,6 +18,17 @@ interface GameObjectWithHealth {
   isDestroyed: boolean;
 }
 
+// Define interface for minions
+interface Minion extends THREE.Group {
+  health: number;
+  maxHealth: number;
+  team: 'ally' | 'enemy';
+  speed: number;
+  targetPosition: THREE.Vector3;
+  isDestroyed: boolean;
+  update: () => void;
+}
+
 // Function to create a simple tree
 const createTree = (position: THREE.Vector3): THREE.Group => {
   const tree = new THREE.Group();
@@ -218,6 +229,10 @@ const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group & Ga
   objective.castShadow = true;
   objective.receiveShadow = true;
   
+  // Store the objective in userData for collision detection
+  base.userData.objective = objective;
+  base.userData.objectiveRadius = 3; // Radius of the objective cylinder
+  
   // Add glowing crystal on top of the objective
   const crystalGeometry = new THREE.OctahedronGeometry(1.5, 1);
   const crystalMaterial = new THREE.MeshStandardMaterial({
@@ -343,6 +358,43 @@ const createTower = (position: THREE.Vector3, isEnemy: boolean): THREE.Group => 
   baseStructure.receiveShadow = true;
   
   tower.add(baseStructure);
+  
+  // Add shooting range indicator (dotted yellow circle)
+  const shootingRange = 15; // Range in units
+  const segments = 64;
+  const rangeGeometry = new THREE.BufferGeometry();
+  
+  // Create circle points
+  const points = [];
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * Math.PI * 2;
+    const x = shootingRange * Math.cos(theta);
+    const z = shootingRange * Math.sin(theta);
+    points.push(new THREE.Vector3(x, 0, z));
+  }
+  
+  rangeGeometry.setFromPoints(points);
+  
+  // Create dotted yellow line material
+  const rangeMaterial = new THREE.LineDashedMaterial({
+    color: 0xffff00,
+    dashSize: 1,
+    gapSize: 0.5,
+    linewidth: 1
+  });
+  
+  const rangeIndicator = new THREE.Line(rangeGeometry, rangeMaterial);
+  rangeIndicator.position.copy(position);
+  rangeIndicator.position.y = 0.2; // Slightly above ground
+  
+  // Compute line distances for dashed lines
+  rangeIndicator.computeLineDistances();
+  
+  // Store shooting range in userData for game logic
+  tower.userData.shootingRange = shootingRange;
+  
+  tower.add(rangeIndicator);
+  
   return tower;
 };
 
@@ -365,6 +417,8 @@ const BaseScene = () => {
     gameOver: false,
     winner: null as 'ally' | 'enemy' | null
   });
+  const [minions, setMinions] = useState<Minion[]>([]);
+  const [nextSpawnTime, setNextSpawnTime] = useState<number>(30);
   
   // Reference to store the bases for resetting
   const basesRef = useRef<{
@@ -448,6 +502,94 @@ const BaseScene = () => {
   const LANE_SQUARE_SIZE = 145; // Size of the square formed by the lanes
   const INNER_SQUARE_SIZE = 140; // Size of the inner square (kept for reference but not used)
   const baseInset = 10; // How much to move bases inward - moved to component level
+  
+  // Function to create a minion
+  const createMinion = (position: THREE.Vector3, team: 'ally' | 'enemy'): Minion => {
+    const minion = new THREE.Group() as Minion;
+    
+    // Set minion properties
+    minion.health = 100;
+    minion.maxHealth = 100;
+    minion.team = team;
+    minion.speed = 0.05;
+    minion.isDestroyed = false;
+    
+    // Create minion body
+    const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ 
+      color: team === 'ally' ? 0x0000ff : 0xff0000,
+      roughness: 0.7
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.position.y = 0.4;
+    body.castShadow = true;
+    minion.add(body);
+    
+    // Create minion head
+    const headGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+    const headMaterial = new THREE.MeshStandardMaterial({ 
+      color: team === 'ally' ? 0x5555ff : 0xff5555,
+      roughness: 0.5
+    });
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    head.position.y = 0.9;
+    head.castShadow = true;
+    minion.add(head);
+    
+    // Set minion position
+    minion.position.copy(position);
+    
+    // Set target position based on team
+    minion.targetPosition = team === 'ally' 
+      ? new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2) // Enemy base
+      : new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2); // Ally base
+    
+    // Update function for minion movement
+    minion.update = () => {
+      if (minion.isDestroyed) return;
+      
+      // Calculate direction to target
+      const direction = new THREE.Vector3()
+        .subVectors(minion.targetPosition, minion.position)
+        .setY(0)
+        .normalize();
+      
+      // Move towards target
+      minion.position.x += direction.x * minion.speed;
+      minion.position.z += direction.z * minion.speed;
+      
+      // Rotate to face direction
+      minion.rotation.y = Math.atan2(direction.x, direction.z);
+      
+      // Check if on a base and adjust height
+      const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
+      const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
+      
+      const distToAllyBase = new THREE.Vector2(minion.position.x - allyBasePos.x, minion.position.z - allyBasePos.z).length();
+      const distToEnemyBase = new THREE.Vector2(minion.position.x - enemyBasePos.x, minion.position.z - enemyBasePos.z).length();
+      
+      const baseRadius = 18;
+      const baseHeight = 3.25;
+      const transitionZone = 5;
+      
+      // Adjust height based on position
+      if (distToAllyBase < baseRadius - transitionZone) {
+        minion.position.y = baseHeight;
+      } else if (distToAllyBase < baseRadius) {
+        const transitionProgress = 1 - ((distToAllyBase - (baseRadius - transitionZone)) / transitionZone);
+        minion.position.y = baseHeight * transitionProgress;
+      } else if (distToEnemyBase < baseRadius - transitionZone) {
+        minion.position.y = baseHeight;
+      } else if (distToEnemyBase < baseRadius) {
+        const transitionProgress = 1 - ((distToEnemyBase - (baseRadius - transitionZone)) / transitionZone);
+        minion.position.y = baseHeight * transitionProgress;
+      } else {
+        minion.position.y = 0;
+      }
+    };
+    
+    return minion;
+  };
   
   useEffect(() => {
     // Scene setup
@@ -613,7 +755,29 @@ const BaseScene = () => {
     const allyBase = createBase(allyBasePos, false); // Bottom left
     const enemyBase = createBase(enemyBasePos, true); // Top right
     mapStructure.add(allyBase, enemyBase);
-    
+
+    // Add ally tower on the middle lane, just before the inner cyan square
+    const towerDirection = new THREE.Vector3().subVectors(enemyBasePos, allyBasePos).normalize();
+    const innerSquareRadius = (LANE_SQUARE_SIZE - 10) / 2; // Half of the inner cyan square size
+    const distanceFromCenter = innerSquareRadius + 5; // 5 units outside the inner cyan square
+    const allyTowerPos = new THREE.Vector3(
+      -towerDirection.x * distanceFromCenter,
+      0,
+      -towerDirection.z * distanceFromCenter
+    );
+    const allyTower = createTower(allyTowerPos, false); // false = ally (blue)
+    mapStructure.add(allyTower);
+
+    // Add a second ally tower closer to the cyan square
+    const closerDistanceFromCenter = 20; // 20 units from the center of the map, a bit more towards blue side
+    const allyTower2Pos = new THREE.Vector3(
+      -towerDirection.x * closerDistanceFromCenter,
+      0,
+      -towerDirection.z * closerDistanceFromCenter
+    );
+    const allyTower2 = createTower(allyTower2Pos, false); // false = ally (blue)
+    mapStructure.add(allyTower2);
+
     // Store references to bases for resetting
     basesRef.current.allyBase = allyBase;
     basesRef.current.enemyBase = enemyBase;
@@ -629,6 +793,83 @@ const BaseScene = () => {
         y: enemyBasePos.z // Top right in 2D coordinates
       }
     });
+    
+    // Define lane paths for minion spawning
+    const lanes = [
+      {
+        name: 'top',
+        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, -LANE_SQUARE_SIZE/2 + 5),
+        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, -LANE_SQUARE_SIZE/2 + 5)
+      },
+      {
+        name: 'mid',
+        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5),
+        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, -LANE_SQUARE_SIZE/2 + 5)
+      },
+      {
+        name: 'bottom',
+        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5),
+        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, LANE_SQUARE_SIZE/2 - 5)
+      }
+    ];
+    
+    // Store all minions
+    const minionsList: Minion[] = [];
+    
+    // Function to spawn a wave of minions
+    const spawnMinionWave = () => {
+      // Reset the next spawn timer
+      setNextSpawnTime(30);
+      
+      // Spawn minions for each lane
+      lanes.forEach(lane => {
+        // Spawn 4 ally minions per lane
+        for (let i = 0; i < 4; i++) {
+          // Add some random offset to prevent minions from stacking
+          const offsetX = (Math.random() - 0.5) * 2;
+          const offsetZ = (Math.random() - 0.5) * 2;
+          const spawnPos = new THREE.Vector3(
+            lane.allySpawn.x + offsetX,
+            0,
+            lane.allySpawn.z + offsetZ
+          );
+          
+          const minion = createMinion(spawnPos, 'ally');
+          scene.add(minion);
+          minionsList.push(minion);
+        }
+        
+        // Spawn 4 enemy minions per lane
+        for (let i = 0; i < 4; i++) {
+          // Add some random offset to prevent minions from stacking
+          const offsetX = (Math.random() - 0.5) * 2;
+          const offsetZ = (Math.random() - 0.5) * 2;
+          const spawnPos = new THREE.Vector3(
+            lane.enemySpawn.x + offsetX,
+            0,
+            lane.enemySpawn.z + offsetZ
+          );
+          
+          const minion = createMinion(spawnPos, 'enemy');
+          scene.add(minion);
+          minionsList.push(minion);
+        }
+      });
+      
+      // Update minions state
+      setMinions([...minionsList]);
+    };
+    
+    // Set up minion spawning interval
+    const spawnInterval = setInterval(spawnMinionWave, 30000); // Spawn every 30 seconds
+    
+    // Set up timer update interval
+    const timerInterval = setInterval(() => {
+      setNextSpawnTime(prev => Math.max(0, prev - 1));
+    }, 1000);
+    
+    // Spawn initial wave
+    spawnMinionWave();
     
     // Function to test damage on bases (for demonstration)
     const testDamage = () => {
@@ -910,9 +1151,44 @@ const BaseScene = () => {
       // Set new target position
       character.targetPosition = intersectionPoint;
       
+      // Check if the target is on a base to adjust the indicator height
+      const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
+      const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
+      
+      // Calculate distance to base centers
+      const distToAllyBase = new THREE.Vector2(intersectionPoint.x - allyBasePos.x, intersectionPoint.z - allyBasePos.z).length();
+      const distToEnemyBase = new THREE.Vector2(intersectionPoint.x - enemyBasePos.x, intersectionPoint.z - enemyBasePos.z).length();
+      
+      // Base properties
+      const baseRadius = 18; // Radius of the base platform
+      const baseHeight = 3.25; // Height of the base platform
+      const transitionZone = 5; // Width of the transition zone for smooth height change
+      
+      // Determine indicator height based on whether it's on a base
+      let indicatorHeight = 0.1; // Default height slightly above ground
+      
+      // Check if on ally base or in transition zone
+      if (distToAllyBase < baseRadius - transitionZone) {
+        // Fully on the base
+        indicatorHeight = baseHeight + 0.1; // Slightly above the base surface
+      } else if (distToAllyBase < baseRadius) {
+        // In the transition zone - calculate gradual height
+        const transitionProgress = 1 - ((distToAllyBase - (baseRadius - transitionZone)) / transitionZone);
+        indicatorHeight = (baseHeight * transitionProgress) + 0.1;
+      }
+      // Check if on enemy base or in transition zone (only if not already on ally base)
+      else if (distToEnemyBase < baseRadius - transitionZone) {
+        // Fully on the base
+        indicatorHeight = baseHeight + 0.1; // Slightly above the base surface
+      } else if (distToEnemyBase < baseRadius) {
+        // In the transition zone - calculate gradual height
+        const transitionProgress = 1 - ((distToEnemyBase - (baseRadius - transitionZone)) / transitionZone);
+        indicatorHeight = (baseHeight * transitionProgress) + 0.1;
+      }
+      
       // Update target indicator position
       targetIndicator.position.copy(intersectionPoint);
-      targetIndicator.position.y = 0.1;
+      targetIndicator.position.y = indicatorHeight;
       targetIndicator.visible = true;
       
       setTimeout(() => {
@@ -970,24 +1246,68 @@ const BaseScene = () => {
       // Base properties
       const baseRadius = 18; // Radius of the base platform
       const baseHeight = 3.25; // Height of the base platform
+      const transitionZone = 5; // Width of the transition zone for smooth height change
+      
+      // Check for collisions with central towers
+      let collisionWithTower = false;
+      
+      // Character collision radius
+      const characterRadius = 0.5;
+      
+      // Check collision with ally base tower
+      if (basesRef.current.allyBase && basesRef.current.allyBase.userData.objective) {
+        const objectiveRadius = basesRef.current.allyBase.userData.objectiveRadius;
+        const totalCollisionRadius = objectiveRadius + characterRadius;
+        const distToAllyTower = new THREE.Vector2(newPosition.x - allyBasePos.x, newPosition.z - allyBasePos.z).length();
+        
+        if (distToAllyTower < totalCollisionRadius) {
+          collisionWithTower = true;
+        }
+      }
+      
+      // Check collision with enemy base tower
+      if (!collisionWithTower && basesRef.current.enemyBase && basesRef.current.enemyBase.userData.objective) {
+        const objectiveRadius = basesRef.current.enemyBase.userData.objectiveRadius;
+        const totalCollisionRadius = objectiveRadius + characterRadius;
+        const distToEnemyTower = new THREE.Vector2(newPosition.x - enemyBasePos.x, newPosition.z - enemyBasePos.z).length();
+        
+        if (distToEnemyTower < totalCollisionRadius) {
+          collisionWithTower = true;
+        }
+      }
       
       // Determine if character is on a base and adjust height
       let characterHeight = 0;
       
-      // Check if on ally base
-      if (distToAllyBase < baseRadius) {
-        // Character is on the ally base - adjust height
+      // Check if on ally base or in transition zone
+      if (distToAllyBase < baseRadius - transitionZone) {
+        // Fully on the base
         characterHeight = baseHeight;
+      } else if (distToAllyBase < baseRadius) {
+        // In the transition zone - calculate gradual height
+        const transitionProgress = 1 - ((distToAllyBase - (baseRadius - transitionZone)) / transitionZone);
+        characterHeight = baseHeight * transitionProgress;
       }
-      // Check if on enemy base
-      else if (distToEnemyBase < baseRadius) {
-        // Character is on the enemy base - adjust height
+      // Check if on enemy base or in transition zone (only if not already on ally base)
+      else if (distToEnemyBase < baseRadius - transitionZone) {
+        // Fully on the base
         characterHeight = baseHeight;
+      } else if (distToEnemyBase < baseRadius) {
+        // In the transition zone - calculate gradual height
+        const transitionProgress = 1 - ((distToEnemyBase - (baseRadius - transitionZone)) / transitionZone);
+        characterHeight = baseHeight * transitionProgress;
       }
       
-      // Update position - always allow movement, just adjust height when on a base
-      character.position.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newX));
-      character.position.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newZ));
+      // Update position - allow movement if no collision with towers
+      if (!collisionWithTower) {
+        character.position.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newX));
+        character.position.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newZ));
+      } else {
+        // If collision with tower, cancel target position
+        character.targetPosition = null;
+        character.direction.set(0, 0, 0);
+      }
+      
       character.position.y = characterHeight; // Set height based on whether on a base
       
       // Update character model position
@@ -1018,6 +1338,11 @@ const BaseScene = () => {
       
       updateMovement();
       
+      // Update all minions
+      minionsList.forEach(minion => {
+        minion.update();
+      });
+      
       // Update player position state
       setPlayerPos({ x: character.position.x, z: character.position.z });
       
@@ -1046,6 +1371,8 @@ const BaseScene = () => {
       window.removeEventListener('resize', onWindowResize);
       mountRef.current?.removeChild(renderer.domElement);
       window.removeEventListener('keydown', onKeyDown);
+      clearInterval(spawnInterval);
+      clearInterval(timerInterval);
     };
   }, [keyBindings, resetGame]);
   
@@ -1102,6 +1429,17 @@ const BaseScene = () => {
           textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
         }}>
           FPS: {fps}
+        </div>
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Next Spawn: {nextSpawnTime}s
         </div>
       </div>
       
