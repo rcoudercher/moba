@@ -79,19 +79,33 @@ const createLane = (start: THREE.Vector3, end: THREE.Vector3, width: number): TH
 const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group => {
   const base = new THREE.Group();
   
-  // Main structure
-  const baseGeometry = new THREE.CylinderGeometry(8, 10, 6, 8);
+  // Main structure - larger size but still low to the ground
+  const baseGeometry = new THREE.CylinderGeometry(18, 22, 3, 8);
   const baseMaterial = new THREE.MeshStandardMaterial({ 
     color: isEnemy ? 0xff0000 : 0x0000ff,
     roughness: 0.7
   });
   const baseStructure = new THREE.Mesh(baseGeometry, baseMaterial);
   baseStructure.position.copy(position);
-  baseStructure.position.y = 3;
+  baseStructure.position.y = 1.5; // Low to the ground
   baseStructure.castShadow = true;
   baseStructure.receiveShadow = true;
   
   base.add(baseStructure);
+  
+  // Add platform on top - thinner
+  const platformGeometry = new THREE.CylinderGeometry(15, 15, 0.5, 8);
+  const platformMaterial = new THREE.MeshStandardMaterial({
+    color: isEnemy ? 0xff5555 : 0x5555ff,
+    roughness: 0.5
+  });
+  const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+  platform.position.copy(position);
+  platform.position.y = 3.25; // Top of the base
+  platform.castShadow = true;
+  platform.receiveShadow = true;
+  base.add(platform);
+  
   return base;
 };
 
