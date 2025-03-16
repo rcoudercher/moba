@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { KeyBinding, defaultKeyBindings } from '../../config/keyBindings';
+import Minimap from './Minimap';
 
 // Import environment components
 import { createSky } from './environment/Sky';
@@ -116,6 +117,9 @@ const BaseScene = () => {
     return savedBindings ? JSON.parse(savedBindings) : defaultKeyBindings;
   });
   
+  // Define MAP_SIZE as a constant outside the useEffect
+  const MAP_SIZE = 100; // Square map size
+  
   useEffect(() => {
     // Scene setup
     const scene = new THREE.Scene();
@@ -223,7 +227,6 @@ const BaseScene = () => {
     
     // Create map structure
     const mapStructure = new THREE.Group();
-    const MAP_SIZE = 100; // Square map size
     
     // Create bases
     const allyBase = createBase(new THREE.Vector3(-MAP_SIZE/2, 0, MAP_SIZE/2), false); // Bottom left
@@ -287,55 +290,25 @@ const BaseScene = () => {
     
     scene.add(mapStructure);
 
-    // Create minimap
-    const minimapSize = 150; // pixels
-    const minimapCamera = new THREE.OrthographicCamera(
-      -MAP_SIZE/2, MAP_SIZE/2,
-      -MAP_SIZE/2, MAP_SIZE/2,
-      1, 1000
-    );
-    minimapCamera.position.set(0, 100, 0);
-    minimapCamera.lookAt(0, 0, 0);
-    
-    // Create a separate scene for minimap
-    const minimapScene = new THREE.Scene();
-    minimapScene.background = new THREE.Color(0x1a472a); // Same as ground color
-    
-    // Add lighting for minimap
-    const minimapLight = new THREE.DirectionalLight(0xffffff, 1);
-    minimapLight.position.set(0, 1, 0);
-    minimapScene.add(minimapLight);
-    minimapScene.add(new THREE.AmbientLight(0xffffff, 1));
-    
-    // Add simplified versions of map elements to minimap scene
-    const minimapGround = ground.clone();
-    minimapScene.add(minimapGround);
-    
-    // Add lanes to minimap
-    const minimapLanes = mapStructure.clone();
-    minimapScene.add(minimapLanes);
-    
-    // Create a special marker for the minimap
-    const minimapMarker = new THREE.Mesh(
-      new THREE.CircleGeometry(3, 32),
-      new THREE.MeshBasicMaterial({ 
-        color: 0x00ff00,
-        side: THREE.DoubleSide
-      })
-    );
-    minimapMarker.rotation.x = -Math.PI / 2;
-    minimapMarker.position.y = 1;
-    minimapScene.add(minimapMarker);
-    
-    const minimapRenderer = new THREE.WebGLRenderer({ antialias: true });
-    minimapRenderer.setSize(minimapSize, minimapSize);
-    minimapRenderer.domElement.style.position = 'absolute';
-    minimapRenderer.domElement.style.bottom = '20px';
-    minimapRenderer.domElement.style.left = '20px';
-    minimapRenderer.domElement.style.border = '2px solid #666';
-    minimapRenderer.domElement.style.borderRadius = '5px';
-    mountRef.current?.appendChild(minimapRenderer.domElement);
-    
+    // Add map boundary outline
+    const boundaryGeometry = new THREE.BufferGeometry();
+    const vertices = new Float32Array([
+      // Draw a square using lines
+      -MAP_SIZE/2, 0, -MAP_SIZE/2,  // Start at top-left
+      MAP_SIZE/2, 0, -MAP_SIZE/2,   // Top line
+      MAP_SIZE/2, 0, -MAP_SIZE/2,   // Start at top-right
+      MAP_SIZE/2, 0, MAP_SIZE/2,    // Right line
+      MAP_SIZE/2, 0, MAP_SIZE/2,    // Start at bottom-right
+      -MAP_SIZE/2, 0, MAP_SIZE/2,   // Bottom line
+      -MAP_SIZE/2, 0, MAP_SIZE/2,   // Start at bottom-left
+      -MAP_SIZE/2, 0, -MAP_SIZE/2   // Left line
+    ]);
+    boundaryGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    const boundaryMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    const boundaryLines = new THREE.LineSegments(boundaryGeometry, boundaryMaterial);
+    boundaryLines.position.y = 0.2; // Slightly above ground to be visible
+    scene.add(boundaryLines);
+
     // Mouse movement and pointer lock
     let euler = new THREE.Euler(0, 0, 0, 'YXZ');
     let prevTime = performance.now();
@@ -449,18 +422,11 @@ const BaseScene = () => {
       
       updateMovement();
       
-      // Update minimap marker position
-      minimapMarker.position.x = character.position.x;
-      minimapMarker.position.z = character.position.z;
-      
       // Update player position state
       setPlayerPos({ x: character.position.x, z: character.position.z });
       
       // Render main view
       renderer.render(scene, camera);
-      
-      // Render minimap with its own scene
-      minimapRenderer.render(minimapScene, minimapCamera);
       
       // Update FPS counter
       setFps(Math.round(1 / delta));
@@ -483,7 +449,6 @@ const BaseScene = () => {
       window.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('resize', onWindowResize);
       mountRef.current?.removeChild(renderer.domElement);
-      mountRef.current?.removeChild(minimapRenderer.domElement);
     };
   }, [keyBindings]);
   
@@ -550,9 +515,16 @@ const BaseScene = () => {
           borderRadius: '8px',
           textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
         }}>
-          X: {Math.round(playerPos.x)} Y: {Math.round(-playerPos.z)}
+          X: {Math.round(playerPos.x)} Y: {Math.round(playerPos.z)}
         </div>
       </div>
+      
+      {/* Add Minimap component */}
+      <Minimap 
+        playerPosition={playerPos} 
+        mapSize={MAP_SIZE} 
+        lanes={[]}
+      />
     </div>
   );
 };
