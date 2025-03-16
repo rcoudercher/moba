@@ -70,7 +70,7 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
       ctx.save();
       ctx.translate(minimapSize/2, minimapSize/2);
       ctx.rotate(Math.PI / 4); // 45 degrees
-      const laneWidth = 6;
+      const laneWidth = 4;
       const laneLength = (mapSize / playableArea) * minimapSize * 1.4;
       ctx.fillRect(-laneWidth/2, -laneLength/2, laneWidth, laneLength);
       ctx.restore();
@@ -96,15 +96,16 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
       ctx.fillRect(botCorner.x - laneWidth/2, botCorner.y, laneWidth, botEnd.y - botCorner.y);
       
       // Draw bases
-      // Ally base (blue)
-      const allyBasePos = worldToMinimap(-mapSize/2, mapSize/2);
+      // Ally base (blue) - now at bottom left
+      const baseInset = 10; // Same inset value as in BaseScene
+      const allyBasePos = worldToMinimap(-mapSize/2 + baseInset, mapSize/2 - baseInset);
       ctx.fillStyle = '#0000ff';
       ctx.beginPath();
       ctx.arc(allyBasePos.x, allyBasePos.y, 8, 0, Math.PI * 2);
       ctx.fill();
       
-      // Enemy base (red)
-      const enemyBasePos = worldToMinimap(mapSize/2, -mapSize/2);
+      // Enemy base (red) - still at top right
+      const enemyBasePos = worldToMinimap(mapSize/2 - baseInset, -mapSize/2 + baseInset);
       ctx.fillStyle = '#ff0000';
       ctx.beginPath();
       ctx.arc(enemyBasePos.x, enemyBasePos.y, 8, 0, Math.PI * 2);

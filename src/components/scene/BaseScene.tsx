@@ -47,33 +47,73 @@ const createBush = (position: THREE.Vector3): THREE.Mesh => {
   return bush;
 };
 
-// Add new functions for creating map elements
+// Function to create a lane
 const createLane = (start: THREE.Vector3, end: THREE.Vector3, width: number): THREE.Mesh => {
-  const direction = new THREE.Vector3().subVectors(end, start);
-  const length = direction.length();
-  const geometry = new THREE.PlaneGeometry(width, length);
-  const material = new THREE.MeshStandardMaterial({ 
-    color: 0x808080, // Gray color for the lane
-    roughness: 0.8
-  });
-  
-  const lane = new THREE.Mesh(geometry, material);
-  lane.receiveShadow = true;
-  
-  // Position and rotate the lane
-  // Calculate the midpoint between start and end
-  const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-  lane.position.copy(midpoint);
-  lane.position.y = 0.1; // Slightly above ground to prevent z-fighting
-  
-  // Rotate the lane to align with the direction
-  lane.rotation.x = -Math.PI / 2; // Make it flat on the ground
-  
-  // Calculate the angle between the direction vector and the x-axis
-  const angle = Math.atan2(direction.z, direction.x);
-  lane.rotation.z = -angle + Math.PI / 2; // Adjust rotation to align with direction
-  
-  return lane;
+  // For straight lanes (horizontal or vertical)
+  if (start.x === end.x || start.z === end.z) {
+    const isHorizontal = start.z === end.z;
+    const length = isHorizontal 
+      ? Math.abs(end.x - start.x) 
+      : Math.abs(end.z - start.z);
+    
+    const laneGeometry = new THREE.PlaneGeometry(isHorizontal ? length : width, isHorizontal ? width : length);
+    const laneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x808080,
+      roughness: 0.8,
+      metalness: 0.2
+    });
+    
+    const lane = new THREE.Mesh(laneGeometry, laneMaterial);
+    
+    // Position at the center point
+    if (isHorizontal) {
+      lane.position.set(
+        (start.x + end.x) / 2,
+        0.1, // Slightly above ground
+        start.z
+      );
+      // No rotation needed for horizontal lanes
+    } else {
+      lane.position.set(
+        start.x,
+        0.1, // Slightly above ground
+        (start.z + end.z) / 2
+      );
+      // Rotate for vertical lanes
+      lane.rotation.y = Math.PI / 2;
+    }
+    
+    lane.receiveShadow = true;
+    return lane;
+  } 
+  // For diagonal lanes
+  else {
+    // Calculate length of the lane
+    const direction = new THREE.Vector3().subVectors(end, start);
+    const length = direction.length();
+    
+    // Create lane geometry
+    const laneGeometry = new THREE.PlaneGeometry(length, width);
+    const laneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x808080,
+      roughness: 0.8,
+      metalness: 0.2
+    });
+    
+    const lane = new THREE.Mesh(laneGeometry, laneMaterial);
+    
+    // Position at the midpoint
+    const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+    lane.position.copy(midpoint);
+    lane.position.y = 0.1; // Slightly above ground
+    
+    // Calculate rotation to align with direction
+    const angle = Math.atan2(direction.z, direction.x);
+    lane.rotation.y = -angle + Math.PI / 2;
+    
+    lane.receiveShadow = true;
+    return lane;
+  }
 };
 
 const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group => {
@@ -133,6 +173,10 @@ const BaseScene = () => {
   const [isControlsEnabled, setIsControlsEnabled] = useState(true);
   const [fps, setFps] = useState<number>(0);
   const [playerPos, setPlayerPos] = useState({ x: 0, z: 0 });
+  const [baseCoordinates, setBaseCoordinates] = useState({
+    ally: { x: 0, y: 0 },
+    enemy: { x: 0, y: 0 }
+  });
   const [keyBindings, setKeyBindings] = useState<KeyBinding[]>(() => {
     const savedBindings = localStorage.getItem('keyBindings');
     return savedBindings ? JSON.parse(savedBindings) : defaultKeyBindings;
@@ -140,7 +184,8 @@ const BaseScene = () => {
   
   // Define MAP_SIZE as a constant outside the useEffect
   const LANE_SQUARE_SIZE = 160; // Size of the square formed by the lanes (increased from 150)
-  const PLAYABLE_AREA = 180; // Size of the playable area (reduced from 200)
+  const PLAYABLE_AREA = 180; // Size of the playable area (reverted back from 160)
+  const baseInset = 10; // How much to move bases inward - moved to component level
   
   useEffect(() => {
     // Scene setup
@@ -239,13 +284,133 @@ const BaseScene = () => {
     
     scene.add(directionalLight);
     
-    // Create ground plane (darker for jungle areas)
-    const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+    // Create a canvas for the ground texture
+    const createGroundTexture = () => {
+      const textureSize = 2048; // High resolution texture
+      const canvas = document.createElement('canvas');
+      canvas.width = textureSize;
+      canvas.height = textureSize;
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) return null;
+      
+      // Fill background with dark green (jungle)
+      ctx.fillStyle = '#1a472a';
+      ctx.fillRect(0, 0, textureSize, textureSize);
+      
+      // Calculate pixel positions
+      const halfSize = textureSize / 2;
+      const laneSquareSize = (LANE_SQUARE_SIZE / PLAYABLE_AREA) * textureSize;
+      const halfLaneSquare = laneSquareSize / 2;
+      const baseInsetPixels = (baseInset / PLAYABLE_AREA) * textureSize;
+      const laneWidth = (8 / PLAYABLE_AREA) * textureSize; // Reduced lane width from 12 to 8
+      
+      // Draw lanes with dirt road color
+      ctx.fillStyle = '#6B4226'; // Dark brown for dirt roads
+      
+      // Helper to convert world coordinates to texture coordinates
+      const worldToTexture = (x: number, z: number) => {
+        // This was incorrectly mapping coordinates - fix to ensure lanes stay within white square
+        const textureX = halfSize + (x / PLAYABLE_AREA) * textureSize;
+        const textureY = halfSize + (z / PLAYABLE_AREA) * textureSize;
+        return { x: textureX, y: textureY };
+      };
+      
+      // Draw mid lane (diagonal)
+      const allyBasePos = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, LANE_SQUARE_SIZE/2 - baseInset);
+      const enemyBasePos = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
+      
+      // Draw diagonal line with width
+      ctx.beginPath();
+      ctx.moveTo(allyBasePos.x, allyBasePos.y);
+      ctx.lineTo(enemyBasePos.x, enemyBasePos.y);
+      ctx.lineWidth = laneWidth;
+      ctx.strokeStyle = '#6B4226';
+      ctx.stroke();
+      
+      // Draw top lane (L-shape)
+      // Vertical part - ensure it stays within lane square
+      const topStart = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, LANE_SQUARE_SIZE/2 - baseInset);
+      const topCorner = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
+      
+      ctx.beginPath();
+      ctx.moveTo(topStart.x, topStart.y);
+      ctx.lineTo(topCorner.x, topCorner.y);
+      ctx.lineWidth = laneWidth;
+      ctx.strokeStyle = '#6B4226';
+      ctx.stroke();
+      
+      // Horizontal part - ensure it stays within lane square
+      const topEnd = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
+      
+      ctx.beginPath();
+      ctx.moveTo(topCorner.x, topCorner.y);
+      ctx.lineTo(topEnd.x, topEnd.y);
+      ctx.lineWidth = laneWidth;
+      ctx.strokeStyle = '#6B4226';
+      ctx.stroke();
+      
+      // Draw bottom lane (L-shape)
+      // Horizontal part - ensure it stays within lane square
+      const botStart = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, LANE_SQUARE_SIZE/2 - baseInset);
+      const botCorner = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, LANE_SQUARE_SIZE/2 - baseInset);
+      
+      ctx.beginPath();
+      ctx.moveTo(botStart.x, botStart.y);
+      ctx.lineTo(botCorner.x, botCorner.y);
+      ctx.lineWidth = laneWidth;
+      ctx.strokeStyle = '#6B4226';
+      ctx.stroke();
+      
+      // Vertical part - ensure it stays within lane square
+      const botEnd = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
+      
+      ctx.beginPath();
+      ctx.moveTo(botCorner.x, botCorner.y);
+      ctx.lineTo(botEnd.x, botEnd.y);
+      ctx.lineWidth = laneWidth;
+      ctx.strokeStyle = '#6B4226';
+      ctx.stroke();
+      
+      // Draw the lane square outline for reference
+      ctx.strokeStyle = '#aaaaaa';
+      ctx.lineWidth = 2;
+      const laneSquareStart = worldToTexture(-LANE_SQUARE_SIZE/2, -LANE_SQUARE_SIZE/2);
+      const laneSquareSizeInPixels = (LANE_SQUARE_SIZE / PLAYABLE_AREA) * textureSize;
+      ctx.strokeRect(
+        laneSquareStart.x,
+        laneSquareStart.y,
+        laneSquareSizeInPixels,
+        laneSquareSizeInPixels
+      );
+      
+      // Create texture from canvas
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.minFilter = THREE.LinearFilter;
+      
+      return texture;
+    };
+    
+    // Create ground plane with lane texture
+    const groundTexture = createGroundTexture();
+    const groundGeometry = new THREE.PlaneGeometry(PLAYABLE_AREA * 2, PLAYABLE_AREA * 2);
     const groundMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x1a472a, // Darker green for jungle
+      map: groundTexture,
       roughness: 0.8,
       metalness: 0.0
     });
+    
+    // Check if texture creation failed
+    if (!groundTexture) {
+      console.error("Failed to create ground texture");
+      // Fallback to a colored material
+      groundMaterial.color = new THREE.Color(0x1a472a);
+    } else {
+      console.log("Ground texture created successfully");
+    }
+    
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -254,50 +419,23 @@ const BaseScene = () => {
     // Create map structure
     const mapStructure = new THREE.Group();
     
-    // Create bases - position them at the corners of the lane square
-    const allyBase = createBase(new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2), false); // Bottom left
-    const enemyBase = createBase(new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2), true); // Top right
+    // Create bases - position them more inside the map boundaries
+    // Ally base at bottom left, enemy base at top right
+    const allyBase = createBase(new THREE.Vector3(-LANE_SQUARE_SIZE/2 + baseInset, 0, LANE_SQUARE_SIZE/2 - baseInset), false); // Bottom left
+    const enemyBase = createBase(new THREE.Vector3(LANE_SQUARE_SIZE/2 - baseInset, 0, -LANE_SQUARE_SIZE/2 + baseInset), true); // Top right
     mapStructure.add(allyBase, enemyBase);
     
-    // Create lanes
-    // Mid lane (diagonal)
-    const midLane = createLane(
-      new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2),
-      new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2),
-      12
-    );
-    
-    // Top lane (through corner)
-    // First segment: from ally base to top-left corner
-    const topLane1 = createLane(
-      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2), // Slightly offset from base
-      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, -LANE_SQUARE_SIZE/2 + 5), // Slightly offset from corner
-      12
-    );
-    
-    // Second segment: from top-left corner to enemy base
-    const topLane2 = createLane(
-      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, -LANE_SQUARE_SIZE/2 + 5), // Slightly offset from corner
-      new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2 + 5), // Slightly offset from enemy base
-      12
-    );
-    
-    // Bottom lane (through corner)
-    // First segment: from ally base to bottom-right corner
-    const botLane1 = createLane(
-      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5), // Slightly offset from base
-      new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, LANE_SQUARE_SIZE/2 - 5), // Slightly offset from corner
-      12
-    );
-    
-    // Second segment: from bottom-right corner to enemy base
-    const botLane2 = createLane(
-      new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, LANE_SQUARE_SIZE/2 - 5), // Slightly offset from corner
-      new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, -LANE_SQUARE_SIZE/2), // Slightly offset from enemy base
-      12
-    );
-    
-    mapStructure.add(midLane, topLane1, topLane2, botLane1, botLane2);
+    // Set base coordinates for debug display
+    setBaseCoordinates({
+      ally: { 
+        x: -LANE_SQUARE_SIZE/2 + baseInset, 
+        y: LANE_SQUARE_SIZE/2 - baseInset // Bottom left in 2D coordinates
+      },
+      enemy: { 
+        x: LANE_SQUARE_SIZE/2 - baseInset, 
+        y: -LANE_SQUARE_SIZE/2 + baseInset // Top right in 2D coordinates
+      }
+    });
     
     // Add towers along lanes
     const towerPositions = [
@@ -596,6 +734,17 @@ const BaseScene = () => {
         }}>
           FPS: {fps}
         </div>
+      </div>
+      
+      {/* Debug block for base coordinates */}
+      <div style={{
+        position: 'absolute',
+        bottom: '10px',
+        right: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '5px'
+      }}>
         <div style={{
           color: '#F7FF00',
           fontSize: '16px',
@@ -605,7 +754,51 @@ const BaseScene = () => {
           borderRadius: '8px',
           textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
         }}>
-          X: {Math.round(playerPos.x)} Y: {Math.round(-playerPos.z)}
+          Player: X: {Math.round(playerPos.x)} Y: {Math.round(-playerPos.z)}
+        </div>
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Ally Base: X: {Math.round(baseCoordinates.ally.x)} Y: {Math.round(baseCoordinates.ally.y)}
+        </div>
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Enemy Base: X: {Math.round(baseCoordinates.enemy.x)} Y: {Math.round(baseCoordinates.enemy.y)}
+        </div>
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Lane Square: {LANE_SQUARE_SIZE}x{LANE_SQUARE_SIZE}
+        </div>
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Playable Area: {PLAYABLE_AREA}x{PLAYABLE_AREA}
         </div>
       </div>
       
