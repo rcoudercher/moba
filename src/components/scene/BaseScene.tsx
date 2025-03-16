@@ -362,6 +362,93 @@ const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group & Ga
   return base;
 };
 
+// Add health to the central monument in each base
+const addHealthToMonument = (base: THREE.Group & GameObjectWithHealth) => {
+  // Find the central objective (monument)
+  const objective = base.userData.objective as THREE.Mesh;
+  if (!objective) return;
+  
+  // Add health properties to the monument
+  objective.userData.health = 500;
+  objective.userData.maxHealth = 500;
+  objective.userData.isDestroyed = false;
+  
+  // Create health bar for the monument
+  const monumentHealthBarWidth = 4;
+  const monumentHealthBarHeight = 0.4;
+  const monumentHealthBarYOffset = 5; // Position above the monument
+  
+  const monumentHealthBar = createHealthBar(
+    monumentHealthBarWidth, 
+    monumentHealthBarHeight, 
+    new THREE.Vector3(0, 0, 0), 
+    monumentHealthBarYOffset
+  );
+  
+  objective.add(monumentHealthBar);
+  objective.userData.healthBar = monumentHealthBar;
+  
+  // Add update health bar method
+  objective.userData.updateHealthBar = () => {
+    const healthPercent = objective.userData.health / objective.userData.maxHealth;
+    
+    // Get canvas context
+    const context = monumentHealthBar.userData.context as CanvasRenderingContext2D;
+    const canvas = monumentHealthBar.userData.canvas as HTMLCanvasElement;
+    const texture = monumentHealthBar.userData.texture as THREE.CanvasTexture;
+    
+    if (!context || !canvas || !texture) return;
+    
+    // Clear canvas
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw background (gray)
+    context.fillStyle = '#444444';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw health with color based on percentage
+    if (healthPercent > 0.6) {
+      context.fillStyle = '#00ff00'; // Green
+    } else if (healthPercent > 0.3) {
+      context.fillStyle = '#ffff00'; // Yellow
+    } else {
+      context.fillStyle = '#ff0000'; // Red
+    }
+    
+    const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
+    context.fillRect(0, 0, healthWidth, canvas.height);
+    
+    // Update texture
+    texture.needsUpdate = true;
+    
+    // Make health bar always face camera
+    const sprite = monumentHealthBar.userData.sprite as THREE.Sprite;
+    if (sprite) {
+      sprite.center.set(0.5, 0);
+    }
+  };
+  
+  // Add take damage method
+  objective.userData.takeDamage = (amount: number) => {
+    if (objective.userData.isDestroyed) return;
+    
+    objective.userData.health -= amount;
+    if (objective.userData.health <= 0) {
+      objective.userData.health = 0;
+      objective.userData.isDestroyed = true;
+      
+      // Handle destruction visually
+      (objective.material as THREE.MeshStandardMaterial).color.set(0x555555);
+      (objective.material as THREE.MeshStandardMaterial).emissive.set(0x000000);
+    }
+    
+    objective.userData.updateHealthBar();
+  };
+  
+  // Initialize health bar
+  objective.userData.updateHealthBar();
+};
+
 const BaseScene = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isControlsEnabled, setIsControlsEnabled] = useState(true);
@@ -384,11 +471,34 @@ const BaseScene = () => {
   const [minions, setMinions] = useState<Minion[]>([]);
   const [nextSpawnTime, setNextSpawnTime] = useState<number>(30);
   
+  // Add player health state
+  const [playerHealth, setPlayerHealth] = useState({
+    current: 100,
+    max: 100,
+    respawnTimer: undefined as number | undefined
+  });
+  
+  // Add monument health state
+  const [monumentHealth, setMonumentHealth] = useState({
+    ally: { current: 500, max: 500 },
+    enemy: { current: 500, max: 500 }
+  });
+  
   // Reference to store the bases for resetting
   const basesRef = useRef<{
     allyBase?: THREE.Group & GameObjectWithHealth,
     enemyBase?: THREE.Group & GameObjectWithHealth
   }>({});
+  
+  // Reference to store the character
+  const characterRef = useRef<{
+    health: number,
+    maxHealth: number,
+    model?: THREE.Mesh
+  }>({
+    health: 100,
+    maxHealth: 100
+  });
   
   // Function to reset the game
   const resetGame = useCallback(() => {
@@ -759,6 +869,8 @@ const BaseScene = () => {
       isOnGround: true,
       gravity: 0.01,
       targetPosition: null as THREE.Vector3 | null,
+      health: 100,
+      maxHealth: 100,
       model: (() => {
         // Simple character representation
         const geometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
@@ -776,6 +888,13 @@ const BaseScene = () => {
         jump: false,
         sprint: false
       }
+    };
+    
+    // Store character in ref for access in JSX
+    characterRef.current = {
+      health: character.health,
+      maxHealth: character.maxHealth,
+      model: character.model
     };
     
     // Create target indicator
@@ -885,6 +1004,10 @@ const BaseScene = () => {
     const allyBase = createBase(allyBasePos, false); // Bottom left
     const enemyBase = createBase(enemyBasePos, true); // Top right
     mapStructure.add(allyBase, enemyBase);
+
+    // Add health to monuments after creating bases
+    addHealthToMonument(allyBase);
+    addHealthToMonument(enemyBase);
 
     // Add ally tower on the middle lane, just before the inner cyan square
     const towerDirection = new THREE.Vector3().subVectors(enemyBasePos, allyBasePos).normalize();
@@ -1065,12 +1188,63 @@ const BaseScene = () => {
       enemyTower2.takeDamage(Math.random() * 30);
     };
     
+    // Function to test damage on player (for demonstration)
+    const testPlayerDamage = () => {
+      // Only for testing - in a real game, damage would come from enemy attacks
+      character.health -= Math.random() * 10;
+      if (character.health < 0) character.health = 0;
+      updatePlayerHealthBar();
+    };
+    
+    // Function to test damage on monuments (for demonstration)
+    const testMonumentDamage = () => {
+      // Only for testing - in a real game, damage would come from player attacks
+      if (allyBase.userData.objective && allyBase.userData.objective.userData.takeDamage) {
+        allyBase.userData.objective.userData.takeDamage(Math.random() * 20);
+        
+        // Update state for UI
+        setMonumentHealth(prev => ({
+          ...prev,
+          ally: {
+            current: allyBase.userData.objective.userData.health,
+            max: allyBase.userData.objective.userData.maxHealth
+          }
+        }));
+      }
+      
+      if (enemyBase.userData.objective && enemyBase.userData.objective.userData.takeDamage) {
+        enemyBase.userData.objective.userData.takeDamage(Math.random() * 20);
+        
+        // Update state for UI
+        setMonumentHealth(prev => ({
+          ...prev,
+          enemy: {
+            current: enemyBase.userData.objective.userData.health,
+            max: enemyBase.userData.objective.userData.maxHealth
+          }
+        }));
+      }
+    };
+    
+    // Function to heal player (for demonstration)
+    const healPlayer = (amount: number) => {
+      character.health = Math.min(character.maxHealth, character.health + amount);
+      updatePlayerHealthBar();
+    };
+    
     // Add event listener for testing damage (press 'D' key)
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'd' || event.key === 'D') {
         testDamage();
       } else if (event.key === 't' || event.key === 'T') {
         testTowerDamage();
+      } else if (event.key === 'p' || event.key === 'P') {
+        testPlayerDamage();
+      } else if (event.key === 'h' || event.key === 'H') {
+        // Heal player (for testing)
+        healPlayer(20);
+      } else if (event.key === 'm' || event.key === 'M') {
+        testMonumentDamage();
       }
     };
     
@@ -1439,6 +1613,117 @@ const BaseScene = () => {
         }
       }
       
+      // Check for proximity to enemy towers and take damage if too close
+      const checkTowerDamageToPlayer = () => {
+        // Only check if player is alive
+        if (character.health <= 0) return;
+        
+        // Check distance to enemy towers
+        [enemyTower1, enemyTower2].forEach(tower => {
+          if (tower.isDestroyed) return;
+          
+          const distToTower = character.position.distanceTo(tower.position);
+          const towerAttackRange = tower.shootingRange;
+          
+          // If player is within tower attack range, take damage
+          if (distToTower < towerAttackRange) {
+            // Create projectile effect from tower to player
+            const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const projectileMaterial = new THREE.MeshBasicMaterial({
+              color: 0xff00ff,
+              transparent: true,
+              opacity: 0.8
+            });
+            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+            projectile.position.copy(tower.position);
+            projectile.position.y += 5; // Start at tower's top
+            scene.add(projectile);
+            
+            // Animate projectile
+            const startPos = projectile.position.clone();
+            const endPos = character.model.position.clone();
+            endPos.y += 1; // Aim at upper body
+            
+            const animateProjectile = (progress: number) => {
+              if (progress >= 1) {
+                scene.remove(projectile);
+                // Deal damage when projectile hits
+                character.health -= 5; // Tower deals 5 damage per hit
+                if (character.health < 0) character.health = 0;
+                updatePlayerHealthBar();
+                return;
+              }
+              
+              // Lerp position
+              projectile.position.lerpVectors(startPos, endPos, progress);
+              
+              // Continue animation
+              requestAnimationFrame(() => animateProjectile(progress + 0.05));
+            };
+            
+            animateProjectile(0);
+            
+            // Set tower cooldown
+            tower.attackCooldown = 60; // 60 frames = 1 second at 60fps
+          }
+        });
+        
+        // Check distance to enemy minions
+        minionsList.forEach(minion => {
+          if (minion.isDestroyed || minion.team !== 'enemy') return;
+          
+          const distToMinion = character.position.distanceTo(minion.position);
+          
+          // If player is within minion attack range and minion is not attacking something else
+          if (distToMinion < minion.attackRange && !minion.attackTarget) {
+            // Set player as target
+            minion.attackTarget = character.model;
+            
+            // If minion can attack (cooldown is 0)
+            if (minion.attackCooldown <= 0) {
+              // Create projectile effect
+              const projectileGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+              const projectileMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff00ff,
+                transparent: true,
+                opacity: 0.8
+              });
+              const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+              projectile.position.copy(minion.position);
+              projectile.position.y += 0.8; // Start at minion's head level
+              scene.add(projectile);
+              
+              // Animate projectile
+              const startPos = projectile.position.clone();
+              const endPos = character.model.position.clone();
+              endPos.y += 1; // Aim at upper body
+              
+              const animateProjectile = (progress: number) => {
+                if (progress >= 1) {
+                  scene.remove(projectile);
+                  // Deal damage when projectile hits
+                  character.health -= minion.damage;
+                  if (character.health < 0) character.health = 0;
+                  updatePlayerHealthBar();
+                  return;
+                }
+                
+                // Lerp position
+                projectile.position.lerpVectors(startPos, endPos, progress);
+                
+                // Continue animation
+                requestAnimationFrame(() => animateProjectile(progress + 0.1));
+              };
+              
+              animateProjectile(0);
+              
+              // Set cooldown
+              minion.attackCooldown = 60; // 60 frames = 1 second at 60fps
+            }
+          }
+        });
+      };
+      
       // Determine if character is on a base and adjust height
       let characterHeight = 0;
       
@@ -1492,6 +1777,9 @@ const BaseScene = () => {
         character.targetPosition = null;
         character.direction.set(0, 0, 0);
       }
+      
+      // Check if player should take damage from enemy towers or minions
+      checkTowerDamageToPlayer();
     };
     
     // Add tower shooting functionality
@@ -1691,6 +1979,72 @@ const BaseScene = () => {
         }
       });
       
+      // Check if player is dead
+      if (character.health <= 0 && character.model.visible) {
+        // Player is dead, show visual effect
+        character.model.visible = false;
+        
+        // Create death explosion effect
+        const explosionGeometry = new THREE.SphereGeometry(1, 16, 16);
+        const explosionMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffff00,
+          transparent: true,
+          opacity: 0.8
+        });
+        const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
+        explosion.position.copy(character.model.position);
+        scene.add(explosion);
+        
+        // Animate explosion and fade out
+        let scale = 1;
+        const expandExplosion = () => {
+          if (scale < 3) {
+            scale += 0.1;
+            explosion.scale.set(scale, scale, scale);
+            explosion.material.opacity -= 0.02;
+            requestAnimationFrame(expandExplosion);
+          } else {
+            scene.remove(explosion);
+          }
+        };
+        expandExplosion();
+        
+        // Set respawn timer
+        const respawnTime = 5; // 5 seconds
+        let respawnTimer = respawnTime;
+        
+        // Update respawn timer display
+        const updateRespawnTimer = () => {
+          setPlayerHealth(prev => ({
+            ...prev,
+            respawnTimer: respawnTimer
+          }));
+          
+          respawnTimer--;
+          
+          if (respawnTimer >= 0) {
+            setTimeout(updateRespawnTimer, 1000);
+          }
+        };
+        
+        updateRespawnTimer();
+        
+        // Respawn player after 5 seconds
+        setTimeout(() => {
+          character.health = character.maxHealth;
+          character.model.visible = true;
+          character.position.set(0, 0, 0); // Reset position to center
+          character.targetPosition = null;
+          updatePlayerHealthBar();
+          
+          // Clear respawn timer
+          setPlayerHealth(prev => ({
+            ...prev,
+            respawnTimer: undefined
+          }));
+        }, respawnTime * 1000);
+      }
+      
       // Update player position state
       setPlayerPos({ x: character.position.x, z: character.position.z });
       
@@ -1712,6 +2066,67 @@ const BaseScene = () => {
     
     animate();
     
+    // Add health bar to the player character
+    const playerHealthBarWidth = 1.5;
+    const playerHealthBarHeight = 0.15;
+    const playerHealthBarYOffset = 3;
+    const playerHealthBar = createHealthBar(playerHealthBarWidth, playerHealthBarHeight, character.position, playerHealthBarYOffset);
+    character.model.add(playerHealthBar);
+
+    // Function to update player health bar
+    const updatePlayerHealthBar = () => {
+      const healthPercent = character.health / character.maxHealth;
+      
+      // Get canvas context
+      const context = playerHealthBar.userData.context as CanvasRenderingContext2D;
+      const canvas = playerHealthBar.userData.canvas as HTMLCanvasElement;
+      const texture = playerHealthBar.userData.texture as THREE.CanvasTexture;
+      
+      if (!context || !canvas || !texture) return;
+      
+      // Clear canvas
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw background (gray)
+      context.fillStyle = '#444444';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw health with color based on percentage
+      if (healthPercent > 0.6) {
+        context.fillStyle = '#00ff00'; // Green
+      } else if (healthPercent > 0.3) {
+        context.fillStyle = '#ffff00'; // Yellow
+      } else {
+        context.fillStyle = '#ff0000'; // Red
+      }
+      
+      const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
+      context.fillRect(0, 0, healthWidth, canvas.height);
+      
+      // Update texture
+      texture.needsUpdate = true;
+      
+      // Make health bar always face camera
+      const sprite = playerHealthBar.userData.sprite as THREE.Sprite;
+      if (sprite) {
+        sprite.center.set(0.5, 0);
+      }
+      
+      // Update the state for UI, preserving the respawnTimer value
+      setPlayerHealth(prev => ({
+        ...prev,
+        current: character.health,
+        max: character.maxHealth
+      }));
+      
+      // Update ref for access in JSX
+      characterRef.current.health = character.health;
+    };
+
+    // Initialize player health bar
+    updatePlayerHealthBar();
+
+    // Add health to the central monument in each base
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mousedown', onMouseClick);
@@ -1949,6 +2364,98 @@ const BaseScene = () => {
         mapSize={LANE_SQUARE_SIZE} 
         lanes={[]}
       />
+      
+      {/* Player health bar at the bottom of the screen */}
+      <div style={{
+        position: 'absolute',
+        bottom: '20px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: '300px',
+        height: '30px',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        borderRadius: '5px',
+        padding: '3px',
+        border: '1px solid #444'
+      }}>
+        <div style={{
+          width: `${(playerHealth.current / playerHealth.max) * 100}%`,
+          height: '100%',
+          backgroundColor: playerHealth.current > 60 ? '#00ff00' : playerHealth.current > 30 ? '#ffff00' : '#ff0000',
+          borderRadius: '3px',
+          transition: 'width 0.3s ease-in-out'
+        }} />
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          color: 'white',
+          fontWeight: 'bold',
+          textShadow: '1px 1px 2px black'
+        }}>
+          {playerHealth.respawnTimer !== undefined ? 
+            `Respawning in ${playerHealth.respawnTimer}...` : 
+            `${Math.ceil(playerHealth.current)} / ${playerHealth.max}`
+          }
+        </div>
+      </div>
+      
+      {/* Monument health display */}
+      <div style={{
+        position: 'absolute',
+        bottom: '60px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        flexDirection: 'row',
+        gap: '20px',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        padding: '5px 10px',
+        borderRadius: '5px'
+      }}>
+        {/* Ally Monument Health */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ color: '#00ffff', fontSize: '12px', marginBottom: '3px' }}>Ally Monument</div>
+          <div style={{
+            width: '120px',
+            height: '15px',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            borderRadius: '3px',
+            padding: '2px',
+            border: '1px solid #444'
+          }}>
+            <div style={{
+              width: `${(monumentHealth.ally.current / monumentHealth.ally.max) * 100}%`,
+              height: '100%',
+              backgroundColor: '#00ffff',
+              borderRadius: '2px',
+              transition: 'width 0.3s ease-in-out'
+            }} />
+          </div>
+        </div>
+        
+        {/* Enemy Monument Health */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ color: '#ff5555', fontSize: '12px', marginBottom: '3px' }}>Enemy Monument</div>
+          <div style={{
+            width: '120px',
+            height: '15px',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            borderRadius: '3px',
+            padding: '2px',
+            border: '1px solid #444'
+          }}>
+            <div style={{
+              width: `${(monumentHealth.enemy.current / monumentHealth.enemy.max) * 100}%`,
+              height: '100%',
+              backgroundColor: '#ff5555',
+              borderRadius: '2px',
+              transition: 'width 0.3s ease-in-out'
+            }} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
