@@ -861,7 +861,7 @@ const BaseScene = () => {
     
     // Character setup
     const character = {
-      position: new THREE.Vector3(0, 0, 0),
+      position: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5), // Start at blue base
       velocity: new THREE.Vector3(),
       direction: new THREE.Vector3(),
       speed: 0.15,
@@ -2033,7 +2033,8 @@ const BaseScene = () => {
         setTimeout(() => {
           character.health = character.maxHealth;
           character.model.visible = true;
-          character.position.set(0, 0, 0); // Reset position to center
+          // Respawn at blue base
+          character.position.set(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5);
           character.targetPosition = null;
           updatePlayerHealthBar();
           
