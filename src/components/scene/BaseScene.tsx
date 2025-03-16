@@ -134,43 +134,50 @@ const createLane = (start: THREE.Vector3, end: THREE.Vector3, width: number): TH
   }
 };
 
-// Function to create a health bar
+// Function to create a health bar using sprites
 const createHealthBar = (width: number, height: number, position: THREE.Vector3, yOffset: number): THREE.Group => {
   const group = new THREE.Group();
   
-  // Background bar (gray)
-  const bgGeometry = new THREE.PlaneGeometry(width, height);
-  const bgMaterial = new THREE.MeshBasicMaterial({ 
-    color: 0x444444,
-    side: THREE.DoubleSide
-  });
-  const bgBar = new THREE.Mesh(bgGeometry, bgMaterial);
+  // Create a canvas for the health bar
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 8;
+  const context = canvas.getContext('2d');
+  if (!context) return group;
   
-  // Health bar (green)
-  const healthGeometry = new THREE.PlaneGeometry(width, height);
-  const healthMaterial = new THREE.MeshBasicMaterial({ 
-    color: 0x00ff00,
-    side: THREE.DoubleSide
-  });
-  const healthBar = new THREE.Mesh(healthGeometry, healthMaterial);
+  // Draw background (gray)
+  context.fillStyle = '#444444';
+  context.fillRect(0, 0, 64, 8);
   
-  // Position the bars
-  bgBar.position.set(0, 0, 0.01); // Slightly in front to avoid z-fighting
-  healthBar.position.set(0, 0, 0);
+  // Draw health (green)
+  context.fillStyle = '#00ff00';
+  context.fillRect(0, 0, 64, 8);
+  
+  // Create sprite texture
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  
+  // Create sprite material
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true
+  });
+  
+  // Create sprite
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(width, height, 1);
+  
+  // Position the sprite
+  sprite.position.y = yOffset;
   
   // Add to group
-  group.add(bgBar);
-  group.add(healthBar);
+  group.add(sprite);
   
-  // Position the group
-  group.position.copy(position);
-  group.position.y += yOffset;
-  
-  // Rotate to face up
-  group.rotation.x = -Math.PI / 2;
-  
-  // Store reference to the health bar for updates
-  group.userData.healthBar = healthBar;
+  // Store reference to the canvas and context for updates
+  group.userData.canvas = canvas;
+  group.userData.context = context;
+  group.userData.texture = texture;
+  group.userData.sprite = sprite;
   
   return group;
 };
@@ -312,23 +319,41 @@ const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group & Ga
     if (!base.healthBar) return;
     
     const healthPercent = base.health / base.maxHealth;
-    const healthBar = base.healthBar.userData.healthBar as THREE.Mesh;
     
-    // Update health bar scale
-    healthBar.scale.x = Math.max(0.001, healthPercent); // Avoid zero scale
+    // Get canvas context
+    const context = base.healthBar.userData.context as CanvasRenderingContext2D;
+    const canvas = base.healthBar.userData.canvas as HTMLCanvasElement;
+    const texture = base.healthBar.userData.texture as THREE.CanvasTexture;
     
-    // Update health bar color based on health percentage
-    const healthBarMaterial = healthBar.material as THREE.MeshBasicMaterial;
+    if (!context || !canvas || !texture) return;
+    
+    // Clear canvas
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw background (gray)
+    context.fillStyle = '#444444';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw health with color based on percentage
     if (healthPercent > 0.6) {
-      healthBarMaterial.color.set(0x00ff00); // Green
+      context.fillStyle = '#00ff00'; // Green
     } else if (healthPercent > 0.3) {
-      healthBarMaterial.color.set(0xffff00); // Yellow
+      context.fillStyle = '#ffff00'; // Yellow
     } else {
-      healthBarMaterial.color.set(0xff0000); // Red
+      context.fillStyle = '#ff0000'; // Red
     }
     
-    // Position the health bar to align left
-    healthBar.position.x = (healthBarWidth / 2) * (healthPercent - 1);
+    const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
+    context.fillRect(0, 0, healthWidth, canvas.height);
+    
+    // Update texture
+    texture.needsUpdate = true;
+    
+    // Make health bar always face camera
+    const sprite = base.healthBar.userData.sprite as THREE.Sprite;
+    if (sprite) {
+      sprite.center.set(0.5, 0);
+    }
   };
   
   // Initialize health bar
@@ -537,23 +562,41 @@ const BaseScene = () => {
       if (!minion.healthBar) return;
       
       const healthPercent = minion.health / minion.maxHealth;
-      const healthBar = minion.healthBar.userData.healthBar as THREE.Mesh;
       
-      // Update health bar scale
-      healthBar.scale.x = Math.max(0.001, healthPercent);
+      // Get canvas context
+      const context = minion.healthBar.userData.context as CanvasRenderingContext2D;
+      const canvas = minion.healthBar.userData.canvas as HTMLCanvasElement;
+      const texture = minion.healthBar.userData.texture as THREE.CanvasTexture;
       
-      // Update health bar color based on health percentage
-      const healthBarMaterial = healthBar.material as THREE.MeshBasicMaterial;
+      if (!context || !canvas || !texture) return;
+      
+      // Clear canvas
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw background (gray)
+      context.fillStyle = '#444444';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw health with color based on percentage
       if (healthPercent > 0.6) {
-        healthBarMaterial.color.set(0x00ff00); // Green
+        context.fillStyle = '#00ff00'; // Green
       } else if (healthPercent > 0.3) {
-        healthBarMaterial.color.set(0xffff00); // Yellow
+        context.fillStyle = '#ffff00'; // Yellow
       } else {
-        healthBarMaterial.color.set(0xff0000); // Red
+        context.fillStyle = '#ff0000'; // Red
       }
       
-      // Position the health bar to align left
-      healthBar.position.x = (healthBarWidth / 2) * (healthPercent - 1);
+      const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
+      context.fillRect(0, 0, healthWidth, canvas.height);
+      
+      // Update texture
+      texture.needsUpdate = true;
+      
+      // Make health bar always face camera
+      const sprite = minion.healthBar.userData.sprite as THREE.Sprite;
+      if (sprite) {
+        sprite.center.set(0.5, 0);
+      }
     };
     
     // Initialize health bar
@@ -1487,7 +1530,7 @@ const BaseScene = () => {
           
           // Animate projectile
           const startPos = projectile.position.clone();
-          const endPos = closestEnemy.position.clone();
+          const endPos = (closestEnemy as THREE.Object3D).position.clone();
           endPos.y += 1; // Aim at upper body
           
           const animateProjectile = (progress: number) => {
@@ -1546,7 +1589,7 @@ const BaseScene = () => {
           
           // Animate projectile
           const startPos = projectile.position.clone();
-          const endPos = closestEnemy.position.clone();
+          const endPos = (closestEnemy as THREE.Object3D).position.clone();
           endPos.y += 1; // Aim at upper body
           
           const animateProjectile = (progress: number) => {
