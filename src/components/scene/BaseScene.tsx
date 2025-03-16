@@ -110,6 +110,7 @@ const BaseScene = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isControlsEnabled, setIsControlsEnabled] = useState(true);
   const [fps, setFps] = useState<number>(0);
+  const [playerPos, setPlayerPos] = useState({ x: 0, z: 0 });
   const [keyBindings, setKeyBindings] = useState<KeyBinding[]>(() => {
     const savedBindings = localStorage.getItem('keyBindings');
     return savedBindings ? JSON.parse(savedBindings) : defaultKeyBindings;
@@ -296,6 +297,36 @@ const BaseScene = () => {
     minimapCamera.position.set(0, 100, 0);
     minimapCamera.lookAt(0, 0, 0);
     
+    // Create a separate scene for minimap
+    const minimapScene = new THREE.Scene();
+    minimapScene.background = new THREE.Color(0x1a472a); // Same as ground color
+    
+    // Add lighting for minimap
+    const minimapLight = new THREE.DirectionalLight(0xffffff, 1);
+    minimapLight.position.set(0, 1, 0);
+    minimapScene.add(minimapLight);
+    minimapScene.add(new THREE.AmbientLight(0xffffff, 1));
+    
+    // Add simplified versions of map elements to minimap scene
+    const minimapGround = ground.clone();
+    minimapScene.add(minimapGround);
+    
+    // Add lanes to minimap
+    const minimapLanes = mapStructure.clone();
+    minimapScene.add(minimapLanes);
+    
+    // Create a special marker for the minimap
+    const minimapMarker = new THREE.Mesh(
+      new THREE.CircleGeometry(3, 32),
+      new THREE.MeshBasicMaterial({ 
+        color: 0x00ff00,
+        side: THREE.DoubleSide
+      })
+    );
+    minimapMarker.rotation.x = -Math.PI / 2;
+    minimapMarker.position.y = 1;
+    minimapScene.add(minimapMarker);
+    
     const minimapRenderer = new THREE.WebGLRenderer({ antialias: true });
     minimapRenderer.setSize(minimapSize, minimapSize);
     minimapRenderer.domElement.style.position = 'absolute';
@@ -305,15 +336,6 @@ const BaseScene = () => {
     minimapRenderer.domElement.style.borderRadius = '5px';
     mountRef.current?.appendChild(minimapRenderer.domElement);
     
-    // Create player marker for minimap
-    const playerMarker = new THREE.Mesh(
-      new THREE.CircleGeometry(2, 32),
-      new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-    );
-    playerMarker.rotation.x = -Math.PI / 2;
-    playerMarker.position.y = 1;
-    scene.add(playerMarker);
-
     // Mouse movement and pointer lock
     let euler = new THREE.Euler(0, 0, 0, 'YXZ');
     let prevTime = performance.now();
@@ -344,15 +366,18 @@ const BaseScene = () => {
       const intersectionPoint = new THREE.Vector3();
       raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
       
+      // Clamp the target position within map boundaries
+      intersectionPoint.x = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, intersectionPoint.x));
+      intersectionPoint.z = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, intersectionPoint.z));
+      
       // Set new target position
       character.targetPosition = intersectionPoint;
       
       // Update target indicator position
       targetIndicator.position.copy(intersectionPoint);
-      targetIndicator.position.y = 0.1; // Slightly above ground to prevent z-fighting
+      targetIndicator.position.y = 0.1;
       targetIndicator.visible = true;
       
-      // Fade out target indicator
       setTimeout(() => {
         targetIndicator.visible = false;
       }, 1000);
@@ -375,7 +400,7 @@ const BaseScene = () => {
         // Calculate direction to target
         const direction = new THREE.Vector3()
           .subVectors(character.targetPosition, character.position)
-          .setY(0); // Keep movement on ground plane
+          .setY(0);
         
         // Check if we're close enough to stop
         if (direction.length() < 0.1) {
@@ -389,10 +414,14 @@ const BaseScene = () => {
         }
       }
       
-      // Update position based on direction
+      // Calculate new position
       const moveSpeed = character.keys.sprint ? character.speed * 1.5 : character.speed;
-      character.position.x += character.direction.x * moveSpeed;
-      character.position.z += character.direction.z * moveSpeed;
+      const newX = character.position.x + character.direction.x * moveSpeed;
+      const newZ = character.position.z + character.direction.z * moveSpeed;
+      
+      // Clamp position within map boundaries
+      character.position.x = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, newX));
+      character.position.z = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, newZ));
       character.model.position.set(character.position.x, character.position.y + 1, character.position.z);
       
       // Update camera position to follow character
@@ -400,6 +429,17 @@ const BaseScene = () => {
       camera.position.y = character.position.y + cameraOffset.y;
       camera.position.z = character.position.z + cameraOffset.z;
       camera.lookAt(character.position);
+      
+      // If character hits boundary, clear target position
+      if (
+        character.position.x === -MAP_SIZE/2 || 
+        character.position.x === MAP_SIZE/2 ||
+        character.position.z === -MAP_SIZE/2 || 
+        character.position.z === MAP_SIZE/2
+      ) {
+        character.targetPosition = null;
+        character.direction.set(0, 0, 0);
+      }
     };
     
     // Update animation loop
@@ -409,15 +449,18 @@ const BaseScene = () => {
       
       updateMovement();
       
-      // Update player marker position on minimap
-      playerMarker.position.x = character.position.x;
-      playerMarker.position.z = character.position.z;
+      // Update minimap marker position
+      minimapMarker.position.x = character.position.x;
+      minimapMarker.position.z = character.position.z;
+      
+      // Update player position state
+      setPlayerPos({ x: character.position.x, z: character.position.z });
       
       // Render main view
       renderer.render(scene, camera);
       
-      // Render minimap
-      minimapRenderer.render(scene, minimapCamera);
+      // Render minimap with its own scene
+      minimapRenderer.render(minimapScene, minimapCamera);
       
       // Update FPS counter
       setFps(Math.round(1 / delta));
@@ -483,15 +526,32 @@ const BaseScene = () => {
         position: 'absolute',
         top: '10px',
         left: '10px',
-        color: '#F7FF00',
-        fontSize: '16px',
-        fontFamily: 'monospace',
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        padding: '8px 12px',
-        borderRadius: '8px',
-        textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '5px'
       }}>
-        FPS: {fps}
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          FPS: {fps}
+        </div>
+        <div style={{
+          color: '#F7FF00',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          X: {Math.round(playerPos.x)} Y: {Math.round(-playerPos.z)}
+        </div>
       </div>
     </div>
   );
