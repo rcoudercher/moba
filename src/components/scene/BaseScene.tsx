@@ -10,7 +10,7 @@ import { createSky } from './environment/Sky';
 import createTower, { Tower, GameObjectWithHealth } from './Tower';
 
 // Define interface for minions
-interface Minion extends THREE.Group {
+interface Minion extends THREE.Group, GameObjectWithHealth {
   health: number;
   maxHealth: number;
   team: 'ally' | 'enemy';
@@ -18,6 +18,10 @@ interface Minion extends THREE.Group {
   targetPosition: THREE.Vector3;
   isDestroyed: boolean;
   update: () => void;
+  attackTarget: THREE.Object3D | null;
+  attackCooldown: number;
+  attackRange: number;
+  damage: number;
 }
 
 // Function to create a simple tree
@@ -448,6 +452,10 @@ const BaseScene = () => {
     minion.team = team;
     minion.speed = 0.05;
     minion.isDestroyed = false;
+    minion.attackTarget = null;
+    minion.attackCooldown = 0;
+    minion.attackRange = 5;
+    minion.damage = 20;
     
     // Create minion body
     const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
@@ -471,6 +479,13 @@ const BaseScene = () => {
     head.castShadow = true;
     minion.add(head);
     
+    // Create health bar
+    const healthBarWidth = 1;
+    const healthBarHeight = 0.1;
+    const healthBarYOffset = 1.5;
+    minion.healthBar = createHealthBar(healthBarWidth, healthBarHeight, new THREE.Vector3(0, 0, 0), healthBarYOffset);
+    minion.add(minion.healthBar);
+    
     // Set minion position
     minion.position.copy(position);
     
@@ -479,9 +494,146 @@ const BaseScene = () => {
       ? new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2) // Enemy base
       : new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2); // Ally base
     
-    // Update function for minion movement
+    // Add methods for health management
+    minion.takeDamage = (amount: number) => {
+      if (minion.isDestroyed) return;
+      
+      minion.health -= amount;
+      if (minion.health <= 0) {
+        minion.health = 0;
+        minion.isDestroyed = true;
+        
+        // Create death effect
+        const explosionGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+        const explosionMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffff00,
+          transparent: true,
+          opacity: 0.8
+        });
+        const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
+        explosion.position.y = 0.5;
+        minion.add(explosion);
+        
+        // Animate explosion and fade out
+        let scale = 1;
+        const expandExplosion = () => {
+          if (scale < 2) {
+            scale += 0.1;
+            explosion.scale.set(scale, scale, scale);
+            explosion.material.opacity -= 0.05;
+            requestAnimationFrame(expandExplosion);
+          } else {
+            minion.visible = false;
+            minion.removeFromParent();
+          }
+        };
+        expandExplosion();
+      }
+      
+      minion.updateHealthBar();
+    };
+    
+    minion.updateHealthBar = () => {
+      if (!minion.healthBar) return;
+      
+      const healthPercent = minion.health / minion.maxHealth;
+      const healthBar = minion.healthBar.userData.healthBar as THREE.Mesh;
+      
+      // Update health bar scale
+      healthBar.scale.x = Math.max(0.001, healthPercent);
+      
+      // Update health bar color based on health percentage
+      const healthBarMaterial = healthBar.material as THREE.MeshBasicMaterial;
+      if (healthPercent > 0.6) {
+        healthBarMaterial.color.set(0x00ff00); // Green
+      } else if (healthPercent > 0.3) {
+        healthBarMaterial.color.set(0xffff00); // Yellow
+      } else {
+        healthBarMaterial.color.set(0xff0000); // Red
+      }
+      
+      // Position the health bar to align left
+      healthBar.position.x = (healthBarWidth / 2) * (healthPercent - 1);
+    };
+    
+    // Initialize health bar
+    minion.updateHealthBar();
+    
+    // Update function for minion movement and combat
     minion.update = () => {
       if (minion.isDestroyed) return;
+      
+      // Decrease attack cooldown if it's active
+      if (minion.attackCooldown > 0) {
+        minion.attackCooldown--;
+      }
+      
+      // If we have a target and it's destroyed, clear it
+      if (minion.attackTarget && 
+          ((minion.attackTarget as any).isDestroyed || 
+           !(minion.attackTarget as any).visible)) {
+        minion.attackTarget = null;
+      }
+      
+      // If we have a target, attack it
+      if (minion.attackTarget && minion.attackCooldown <= 0) {
+        // Face the target
+        const targetDir = new THREE.Vector3()
+          .subVectors(minion.attackTarget.position, minion.position)
+          .setY(0)
+          .normalize();
+        
+        minion.rotation.y = Math.atan2(targetDir.x, targetDir.z);
+        
+        // Attack
+        if ((minion.attackTarget as any).takeDamage) {
+          // Create projectile effect
+          const projectileGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+          const projectileMaterial = new THREE.MeshBasicMaterial({
+            color: minion.team === 'ally' ? 0x00ffff : 0xff00ff,
+            transparent: true,
+            opacity: 0.8
+          });
+          const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+          projectile.position.copy(minion.position);
+          projectile.position.y += 0.8; // Start at minion's head level
+          
+          // Add to scene
+          const currentScene = minion.parent;
+          if (currentScene) {
+            currentScene.add(projectile);
+          }
+          
+          // Animate projectile
+          const startPos = projectile.position.clone();
+          const endPos = minion.attackTarget.position.clone();
+          endPos.y += 1; // Aim at upper body
+          
+          const animateProjectile = (progress: number) => {
+            if (progress >= 1) {
+              if (projectile.parent) {
+                projectile.parent.remove(projectile);
+              }
+              // Deal damage when projectile hits
+              (minion.attackTarget as any).takeDamage(minion.damage);
+              return;
+            }
+            
+            // Lerp position
+            projectile.position.lerpVectors(startPos, endPos, progress);
+            
+            // Continue animation
+            requestAnimationFrame(() => animateProjectile(progress + 0.1));
+          };
+          
+          animateProjectile(0);
+          
+          // Set cooldown
+          minion.attackCooldown = 60; // 60 frames = 1 second at 60fps
+        }
+        
+        return; // Don't move while attacking
+      }
       
       // Calculate direction to target
       const direction = new THREE.Vector3()
@@ -696,8 +848,8 @@ const BaseScene = () => {
     const innerSquareRadius = (LANE_SQUARE_SIZE - 10) / 2; // Half of the inner cyan square size
     
     // Simplified tower positioning - just two positions per side
-    const outerTowerDistance = 29; // Further from center
-    const innerTowerDistance = 11; // Closer to center
+    const outerTowerDistance = 60; // Further from center
+    const innerTowerDistance = 21; // Closer to center
     
     // Add first ally tower (outer)
     const allyTower1Pos = new THREE.Vector3(
@@ -1299,6 +1451,181 @@ const BaseScene = () => {
       }
     };
     
+    // Add tower shooting functionality
+    const updateTowerAttacks = () => {
+      // Check if ally towers can attack enemy minions
+      [allyTower1, allyTower2].forEach(tower => {
+        if (tower.isDestroyed || tower.attackCooldown > 0) return;
+        
+        // Find closest enemy minion within range
+        let closestEnemy: Minion | null = null;
+        let closestDistance = Infinity;
+        
+        minionsList.forEach(minion => {
+          if (minion.isDestroyed || minion.team !== 'enemy') return;
+          
+          const distance = tower.position.distanceTo(minion.position);
+          if (distance <= tower.shootingRange && distance < closestDistance) {
+            closestEnemy = minion;
+            closestDistance = distance;
+          }
+        });
+        
+        // Attack if enemy found
+        if (closestEnemy) {
+          // Create projectile effect
+          const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+          const projectileMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ffff,
+            transparent: true,
+            opacity: 0.8
+          });
+          const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+          projectile.position.copy(tower.position);
+          projectile.position.y += 5; // Start at tower's top
+          scene.add(projectile);
+          
+          // Animate projectile
+          const startPos = projectile.position.clone();
+          const endPos = closestEnemy.position.clone();
+          endPos.y += 1; // Aim at upper body
+          
+          const animateProjectile = (progress: number) => {
+            if (progress >= 1) {
+              scene.remove(projectile);
+              // Deal damage when projectile hits (2 shots to kill)
+              closestEnemy!.takeDamage(50);
+              return;
+            }
+            
+            // Lerp position
+            projectile.position.lerpVectors(startPos, endPos, progress);
+            
+            // Continue animation
+            requestAnimationFrame(() => animateProjectile(progress + 0.05));
+          };
+          
+          animateProjectile(0);
+          
+          // Set cooldown
+          tower.attackCooldown = 45; // 45 frames = 0.75 seconds at 60fps
+        }
+      });
+      
+      // Check if enemy towers can attack ally minions
+      [enemyTower1, enemyTower2].forEach(tower => {
+        if (tower.isDestroyed || tower.attackCooldown > 0) return;
+        
+        // Find closest ally minion within range
+        let closestEnemy: Minion | null = null;
+        let closestDistance = Infinity;
+        
+        minionsList.forEach(minion => {
+          if (minion.isDestroyed || minion.team !== 'ally') return;
+          
+          const distance = tower.position.distanceTo(minion.position);
+          if (distance <= tower.shootingRange && distance < closestDistance) {
+            closestEnemy = minion;
+            closestDistance = distance;
+          }
+        });
+        
+        // Attack if enemy found
+        if (closestEnemy) {
+          // Create projectile effect
+          const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+          const projectileMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff00ff,
+            transparent: true,
+            opacity: 0.8
+          });
+          const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+          projectile.position.copy(tower.position);
+          projectile.position.y += 5; // Start at tower's top
+          scene.add(projectile);
+          
+          // Animate projectile
+          const startPos = projectile.position.clone();
+          const endPos = closestEnemy.position.clone();
+          endPos.y += 1; // Aim at upper body
+          
+          const animateProjectile = (progress: number) => {
+            if (progress >= 1) {
+              scene.remove(projectile);
+              // Deal damage when projectile hits (2 shots to kill)
+              closestEnemy!.takeDamage(50);
+              return;
+            }
+            
+            // Lerp position
+            projectile.position.lerpVectors(startPos, endPos, progress);
+            
+            // Continue animation
+            requestAnimationFrame(() => animateProjectile(progress + 0.05));
+          };
+          
+          animateProjectile(0);
+          
+          // Set cooldown
+          tower.attackCooldown = 45; // 45 frames = 0.75 seconds at 60fps
+        }
+      });
+      
+      // Check if minions can attack enemies
+      minionsList.forEach(minion => {
+        if (minion.isDestroyed) return;
+        
+        // Skip if already has a target
+        if (minion.attackTarget) return;
+        
+        // Find closest enemy (minion, tower, or base)
+        let closestEnemy: THREE.Object3D | null = null;
+        let closestDistance = Infinity;
+        
+        // Check enemy minions
+        minionsList.forEach(otherMinion => {
+          if (otherMinion.isDestroyed || otherMinion.team === minion.team) return;
+          
+          const distance = minion.position.distanceTo(otherMinion.position);
+          if (distance <= minion.attackRange && distance < closestDistance) {
+            closestEnemy = otherMinion;
+            closestDistance = distance;
+          }
+        });
+        
+        // Check enemy towers
+        const enemyTowers = minion.team === 'ally' 
+          ? [enemyTower1, enemyTower2] as Tower[]
+          : [allyTower1, allyTower2] as Tower[];
+        
+        enemyTowers.forEach(tower => {
+          if (tower.isDestroyed) return;
+          
+          const distance = minion.position.distanceTo(tower.position);
+          if (distance <= minion.attackRange && distance < closestDistance) {
+            closestEnemy = tower;
+            closestDistance = distance;
+          }
+        });
+        
+        // Check enemy base
+        const targetBase = minion.team === 'ally' ? basesRef.current.enemyBase : basesRef.current.allyBase;
+        if (targetBase) {
+          const distanceToBase = minion.position.distanceTo(targetBase.position);
+          
+          if (distanceToBase <= minion.attackRange + 15 && distanceToBase < closestDistance) {
+            closestEnemy = targetBase;
+            closestDistance = distanceToBase;
+          }
+        }
+        
+        // Set target if found
+        if (closestEnemy) {
+          minion.attackTarget = closestEnemy;
+        }
+      });
+    };
+    
     // Update animation loop
     const animate = () => {
       const time = performance.now();
@@ -1306,9 +1633,19 @@ const BaseScene = () => {
       
       updateMovement();
       
+      // Update tower attacks
+      updateTowerAttacks();
+      
       // Update all minions
       minionsList.forEach(minion => {
         minion.update();
+      });
+      
+      // Decrease tower attack cooldowns
+      [allyTower1, allyTower2, enemyTower1, enemyTower2].forEach(tower => {
+        if (tower.attackCooldown > 0) {
+          tower.attackCooldown--;
+        }
       });
       
       // Update player position state

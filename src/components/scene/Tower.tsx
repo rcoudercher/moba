@@ -1,19 +1,20 @@
 import * as THREE from 'three';
 
-// Define interfaces for game objects with health
-export interface GameObjectWithHealth {
+// Interface for objects with health
+export interface GameObjectWithHealth extends THREE.Object3D {
   health: number;
   maxHealth: number;
+  isDestroyed: boolean;
   healthBar?: THREE.Group;
   takeDamage: (amount: number) => void;
   updateHealthBar: () => void;
-  isDestroyed: boolean;
 }
 
-// Define interface for tower
+// Tower interface
 export interface Tower extends THREE.Group, GameObjectWithHealth {
   team: 'ally' | 'enemy';
   shootingRange: number;
+  attackCooldown: number;
 }
 
 // Function to create a health bar
@@ -48,7 +49,7 @@ const createHealthBar = (width: number, height: number, position: THREE.Vector3,
   group.position.copy(position);
   group.position.y += yOffset;
   
-  // Rotate to face up
+  // Rotate to face camera
   group.rotation.x = -Math.PI / 2;
   
   // Store reference to the health bar for updates
@@ -62,74 +63,97 @@ const createHealthBar = (width: number, height: number, position: THREE.Vector3,
  * @param position - The position of the tower in the scene
  * @param isEnemy - Whether the tower belongs to the enemy team (red) or ally team (blue)
  * @param initialHealth - The initial health of the tower (default: 300)
- * @param shootingRange - The shooting range of the tower (default: 15)
  * @returns A Tower object with all necessary properties and methods
  */
 export const createTower = (
   position: THREE.Vector3, 
   isEnemy: boolean, 
-  initialHealth: number = 300,
-  shootingRange: number = 15
+  initialHealth: number = 300
 ): Tower => {
   const tower = new THREE.Group() as Tower;
   
   // Set tower properties
-  tower.team = isEnemy ? 'enemy' : 'ally';
   tower.health = initialHealth;
   tower.maxHealth = initialHealth;
   tower.isDestroyed = false;
-  tower.shootingRange = shootingRange;
+  tower.team = isEnemy ? 'enemy' : 'ally';
+  tower.shootingRange = 15;
+  tower.attackCooldown = 0;
   
-  // Tower base
-  const baseGeometry = new THREE.CylinderGeometry(1, 1.5, 8, 8);
+  // Create tower base
+  const baseGeometry = new THREE.CylinderGeometry(1.5, 2, 2, 8);
   const baseMaterial = new THREE.MeshStandardMaterial({ 
+    color: isEnemy ? 0xff0000 : 0x0000ff,
+    roughness: 0.7
+  });
+  const base = new THREE.Mesh(baseGeometry, baseMaterial);
+  base.position.y = 1;
+  base.castShadow = true;
+  base.receiveShadow = true;
+  tower.add(base);
+  
+  // Create tower middle section
+  const middleGeometry = new THREE.CylinderGeometry(1.2, 1.5, 4, 8);
+  const middleMaterial = new THREE.MeshStandardMaterial({ 
     color: isEnemy ? 0xdd0000 : 0x0000dd,
     roughness: 0.6
   });
-  const baseStructure = new THREE.Mesh(baseGeometry, baseMaterial);
-  baseStructure.position.copy(position);
-  baseStructure.position.y = 4;
-  baseStructure.castShadow = true;
-  baseStructure.receiveShadow = true;
+  const middle = new THREE.Mesh(middleGeometry, middleMaterial);
+  middle.position.y = 4;
+  middle.castShadow = true;
+  middle.receiveShadow = true;
+  tower.add(middle);
   
-  tower.add(baseStructure);
+  // Create tower top
+  const topGeometry = new THREE.CylinderGeometry(1.5, 1.2, 1, 8);
+  const topMaterial = new THREE.MeshStandardMaterial({ 
+    color: isEnemy ? 0xbb0000 : 0x0000bb,
+    roughness: 0.5
+  });
+  const top = new THREE.Mesh(topGeometry, topMaterial);
+  top.position.y = 6.5;
+  top.castShadow = true;
+  top.receiveShadow = true;
+  tower.add(top);
   
-  // Add shooting range indicator (dotted yellow circle)
+  // Create shooting range indicator (dotted yellow circle)
   const segments = 64;
-  const rangeGeometry = new THREE.BufferGeometry();
+  const shootingRange = 15;
   
-  // Create circle points
-  const points = [];
+  // Create a circle geometry
+  const rangeGeometry = new THREE.BufferGeometry();
+  const rangeVertices = [];
+  
   for (let i = 0; i <= segments; i++) {
     const theta = (i / segments) * Math.PI * 2;
-    const x = tower.shootingRange * Math.cos(theta);
-    const z = tower.shootingRange * Math.sin(theta);
-    points.push(new THREE.Vector3(x, 0, z));
+    const x = shootingRange * Math.cos(theta);
+    const z = shootingRange * Math.sin(theta);
+    rangeVertices.push(x, 0, z);
   }
   
-  rangeGeometry.setFromPoints(points);
+  rangeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(rangeVertices, 3));
   
-  // Create dotted yellow line material
+  // Create dashed line material
   const rangeMaterial = new THREE.LineDashedMaterial({
     color: 0xffff00,
     dashSize: 1,
     gapSize: 0.5,
-    linewidth: 1
   });
   
+  // Create the line
   const rangeIndicator = new THREE.Line(rangeGeometry, rangeMaterial);
-  rangeIndicator.position.copy(position);
   rangeIndicator.position.y = 0.2; // Slightly above ground
-  
-  // Compute line distances for dashed lines
-  rangeIndicator.computeLineDistances();
-  
+  rangeIndicator.computeLineDistances(); // Required for dashed lines
   tower.add(rangeIndicator);
   
+  // Store shooting range in userData for game logic
+  tower.userData.shootingRange = shootingRange;
+  
   // Create and add health bar
-  const healthBarWidth = 5;
-  const healthBarHeight = 0.5;
-  const healthBarYOffset = 9; // Position above the tower
+  const healthBarWidth = 3;
+  const healthBarHeight = 0.3;
+  const healthBarYOffset = 8; // Position above the tower
+  
   tower.healthBar = createHealthBar(healthBarWidth, healthBarHeight, position, healthBarYOffset);
   tower.add(tower.healthBar);
   
@@ -144,14 +168,13 @@ export const createTower = (
       
       // Handle destruction
       // Create explosion effect
-      const explosionGeometry = new THREE.SphereGeometry(3, 32, 32);
+      const explosionGeometry = new THREE.SphereGeometry(2, 32, 32);
       const explosionMaterial = new THREE.MeshBasicMaterial({
         color: 0xffff00,
         transparent: true,
         opacity: 0.8
       });
       const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
-      explosion.position.copy(position);
       explosion.position.y = 4;
       tower.add(explosion);
       
@@ -170,10 +193,17 @@ export const createTower = (
       expandExplosion();
       
       // Make tower look damaged
-      baseStructure.scale.y = 0.3; // Collapse it
-      baseStructure.position.y = 1.5; // Lower it
+      [base, middle, top].forEach(part => {
+        (part.material as THREE.MeshStandardMaterial).color.set(0x555555);
+        (part.material as THREE.MeshStandardMaterial).emissive.set(0x000000);
+      });
       
-      // Hide range indicator when destroyed
+      // Collapse the tower a bit
+      middle.scale.y = 0.5;
+      middle.position.y = 3;
+      top.visible = false;
+      
+      // Hide range indicator
       rangeIndicator.visible = false;
     }
     
