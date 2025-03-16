@@ -186,9 +186,9 @@ const BaseScene = () => {
   
   // Define MAP_SIZE as a constant outside the useEffect
   const GAME_MAP_SIZE = 200; // Total size of the game map
-  const PLAYABLE_AREA = 175; // Size of the playable area
-  const LANE_SQUARE_SIZE = 150; // Size of the square formed by the lanes
-  const INNER_SQUARE_SIZE = 130; // Size of the inner square
+  const PLAYABLE_AREA = 180; // Size of the playable area
+  const LANE_SQUARE_SIZE = 160; // Size of the square formed by the lanes
+  const INNER_SQUARE_SIZE = 140; // Size of the inner square
   const baseInset = 10; // How much to move bases inward - moved to component level
   
   useEffect(() => {
