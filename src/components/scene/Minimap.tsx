@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 
 interface MinimapProps {
   playerPosition: { x: number, z: number };
-  mapSize: number;
+  mapSize: number; // This is now the lane square size (150)
   lanes: THREE.Object3D[];
 }
 
@@ -16,15 +16,18 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    const minimapSize = 150;
+    const minimapSize = 150; // Canvas size in pixels
     canvas.width = minimapSize;
     canvas.height = minimapSize;
     
+    // Define the playable area size (200)
+    const playableArea = 200;
+    
     // Function to convert world coordinates to minimap coordinates
     const worldToMinimap = (x: number, z: number) => {
-      // Map from world space (-mapSize/2 to mapSize/2) to canvas space (0 to minimapSize)
-      const canvasX = ((x + mapSize/2) / mapSize) * minimapSize;
-      const canvasY = ((z + mapSize/2) / mapSize) * minimapSize;
+      // Map from world space (-playableArea/2 to playableArea/2) to canvas space (0 to minimapSize)
+      const canvasX = ((x + playableArea/2) / playableArea) * minimapSize;
+      const canvasY = ((z + playableArea/2) / playableArea) * minimapSize;
       return { x: canvasX, y: canvasY };
     };
     
@@ -34,6 +37,32 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
       ctx.fillStyle = '#1a472a'; // Dark green background
       ctx.fillRect(0, 0, minimapSize, minimapSize);
       
+      // Draw trees in border (simplified as dots)
+      ctx.fillStyle = '#2E8B57'; // Green for trees
+      
+      // Function to check if a position is in the border area
+      const isInBorderArea = (x: number, z: number) => {
+        const absX = Math.abs(x);
+        const absZ = Math.abs(z);
+        const laneHalf = mapSize / 2;
+        const playableHalf = playableArea / 2;
+        
+        return (absX > laneHalf - 5 && absX < playableHalf) || 
+               (absZ > laneHalf - 5 && absZ < playableHalf);
+      };
+      
+      // Add dots representing trees in the border
+      for (let i = -playableArea/2; i <= playableArea/2; i += 5) {
+        for (let j = -playableArea/2; j <= playableArea/2; j += 5) {
+          if (isInBorderArea(i, j) && Math.random() < 0.7) {
+            const pos = worldToMinimap(i, j);
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, 1, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+      
       // Draw lanes
       ctx.fillStyle = '#808080'; // Gray color for lanes
       
@@ -41,28 +70,30 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
       ctx.save();
       ctx.translate(minimapSize/2, minimapSize/2);
       ctx.rotate(Math.PI / 4); // 45 degrees
-      ctx.fillRect(-6, -minimapSize/1.4, 12, minimapSize * 1.4);
+      const laneWidth = 6;
+      const laneLength = (mapSize / playableArea) * minimapSize * 1.4;
+      ctx.fillRect(-laneWidth/2, -laneLength/2, laneWidth, laneLength);
       ctx.restore();
       
       // Top lane (two segments)
       // Vertical part
       const topStart = worldToMinimap(-mapSize/2 + 5, mapSize/2);
       const topCorner = worldToMinimap(-mapSize/2 + 5, -mapSize/2 + 5);
-      ctx.fillRect(topStart.x - 6, topStart.y, 12, topCorner.y - topStart.y);
+      ctx.fillRect(topStart.x - laneWidth/2, topStart.y, laneWidth, topCorner.y - topStart.y);
       
       // Horizontal part
       const topEnd = worldToMinimap(mapSize/2, -mapSize/2 + 5);
-      ctx.fillRect(topCorner.x, topCorner.y - 6, topEnd.x - topCorner.x, 12);
+      ctx.fillRect(topCorner.x, topCorner.y - laneWidth/2, topEnd.x - topCorner.x, laneWidth);
       
       // Bottom lane (two segments)
       // Horizontal part
       const botStart = worldToMinimap(-mapSize/2 + 5, mapSize/2 - 5);
       const botCorner = worldToMinimap(mapSize/2 - 5, mapSize/2 - 5);
-      ctx.fillRect(botStart.x, botStart.y - 6, botCorner.x - botStart.x, 12);
+      ctx.fillRect(botStart.x, botStart.y - laneWidth/2, botCorner.x - botStart.x, laneWidth);
       
       // Vertical part
       const botEnd = worldToMinimap(mapSize/2 - 5, -mapSize/2);
-      ctx.fillRect(botCorner.x - 6, botCorner.y, 12, botEnd.y - botCorner.y);
+      ctx.fillRect(botCorner.x - laneWidth/2, botCorner.y, laneWidth, botEnd.y - botCorner.y);
       
       // Draw bases
       // Ally base (blue)
@@ -79,10 +110,22 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
       ctx.arc(enemyBasePos.x, enemyBasePos.y, 8, 0, Math.PI * 2);
       ctx.fill();
       
-      // Draw map boundary
+      // Draw playable area boundary (white)
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.strokeRect(0, 0, minimapSize, minimapSize);
+      
+      // Draw lane square boundary (gray)
+      const laneStart = worldToMinimap(-mapSize/2, -mapSize/2);
+      const laneSize = (mapSize / playableArea) * minimapSize;
+      ctx.strokeStyle = '#aaaaaa';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        laneStart.x, 
+        laneStart.y, 
+        laneSize, 
+        laneSize
+      );
       
       // Draw player marker
       const playerPos = worldToMinimap(playerPosition.x, playerPosition.z);

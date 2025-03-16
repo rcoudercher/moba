@@ -125,7 +125,8 @@ const BaseScene = () => {
   });
   
   // Define MAP_SIZE as a constant outside the useEffect
-  const MAP_SIZE = 150; // Increased map size to match DOTA scale
+  const LANE_SQUARE_SIZE = 150; // Size of the square formed by the lanes
+  const PLAYABLE_AREA = 200; // Size of the playable area
   
   useEffect(() => {
     // Scene setup
@@ -235,46 +236,46 @@ const BaseScene = () => {
     // Create map structure
     const mapStructure = new THREE.Group();
     
-    // Create bases
-    const allyBase = createBase(new THREE.Vector3(-MAP_SIZE/2, 0, MAP_SIZE/2), false); // Bottom left
-    const enemyBase = createBase(new THREE.Vector3(MAP_SIZE/2, 0, -MAP_SIZE/2), true); // Top right
+    // Create bases - position them at the corners of the lane square
+    const allyBase = createBase(new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2), false); // Bottom left
+    const enemyBase = createBase(new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2), true); // Top right
     mapStructure.add(allyBase, enemyBase);
     
     // Create lanes
     // Mid lane (diagonal)
     const midLane = createLane(
-      new THREE.Vector3(-MAP_SIZE/2, 0, MAP_SIZE/2),
-      new THREE.Vector3(MAP_SIZE/2, 0, -MAP_SIZE/2),
+      new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2),
+      new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2),
       12
     );
     
     // Top lane (through corner)
     // First segment: from ally base to top-left corner
     const topLane1 = createLane(
-      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, MAP_SIZE/2), // Slightly offset from base
-      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, -MAP_SIZE/2 + 5), // Slightly offset from corner
+      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2), // Slightly offset from base
+      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, -LANE_SQUARE_SIZE/2 + 5), // Slightly offset from corner
       12
     );
     
     // Second segment: from top-left corner to enemy base
     const topLane2 = createLane(
-      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, -MAP_SIZE/2 + 5), // Slightly offset from corner
-      new THREE.Vector3(MAP_SIZE/2, 0, -MAP_SIZE/2 + 5), // Slightly offset from enemy base
+      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, -LANE_SQUARE_SIZE/2 + 5), // Slightly offset from corner
+      new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2 + 5), // Slightly offset from enemy base
       12
     );
     
     // Bottom lane (through corner)
     // First segment: from ally base to bottom-right corner
     const botLane1 = createLane(
-      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, MAP_SIZE/2 - 5), // Slightly offset from base
-      new THREE.Vector3(MAP_SIZE/2 - 5, 0, MAP_SIZE/2 - 5), // Slightly offset from corner
+      new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5), // Slightly offset from base
+      new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, LANE_SQUARE_SIZE/2 - 5), // Slightly offset from corner
       12
     );
     
     // Second segment: from bottom-right corner to enemy base
     const botLane2 = createLane(
-      new THREE.Vector3(MAP_SIZE/2 - 5, 0, MAP_SIZE/2 - 5), // Slightly offset from corner
-      new THREE.Vector3(MAP_SIZE/2 - 5, 0, -MAP_SIZE/2), // Slightly offset from enemy base
+      new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, LANE_SQUARE_SIZE/2 - 5), // Slightly offset from corner
+      new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, -LANE_SQUARE_SIZE/2), // Slightly offset from enemy base
       12
     );
     
@@ -283,17 +284,17 @@ const BaseScene = () => {
     // Add towers along lanes
     const towerPositions = [
       // Mid lane towers
-      { pos: new THREE.Vector3(-30, 0, 30), enemy: false },
+      { pos: new THREE.Vector3(-LANE_SQUARE_SIZE/4, 0, LANE_SQUARE_SIZE/4), enemy: false },
       { pos: new THREE.Vector3(0, 0, 0), enemy: false },
-      { pos: new THREE.Vector3(30, 0, -30), enemy: true },
+      { pos: new THREE.Vector3(LANE_SQUARE_SIZE/4, 0, -LANE_SQUARE_SIZE/4), enemy: true },
       // Top lane towers
-      { pos: new THREE.Vector3(-45, 0, 0), enemy: false },
-      { pos: new THREE.Vector3(-45, 0, -45), enemy: false },
-      { pos: new THREE.Vector3(0, 0, -45), enemy: true },
+      { pos: new THREE.Vector3(-LANE_SQUARE_SIZE/3, 0, 0), enemy: false },
+      { pos: new THREE.Vector3(-LANE_SQUARE_SIZE/3, 0, -LANE_SQUARE_SIZE/3), enemy: false },
+      { pos: new THREE.Vector3(0, 0, -LANE_SQUARE_SIZE/3), enemy: true },
       // Bottom lane towers
-      { pos: new THREE.Vector3(0, 0, 45), enemy: false },
-      { pos: new THREE.Vector3(45, 0, 45), enemy: false },
-      { pos: new THREE.Vector3(45, 0, 0), enemy: true },
+      { pos: new THREE.Vector3(0, 0, LANE_SQUARE_SIZE/3), enemy: false },
+      { pos: new THREE.Vector3(LANE_SQUARE_SIZE/3, 0, LANE_SQUARE_SIZE/3), enemy: false },
+      { pos: new THREE.Vector3(LANE_SQUARE_SIZE/3, 0, 0), enemy: true },
     ];
     
     towerPositions.forEach(({ pos, enemy }) => {
@@ -302,25 +303,74 @@ const BaseScene = () => {
     });
     
     scene.add(mapStructure);
-
-    // Add map boundary outline
+    
+    // Add map boundary outline (showing the playable area)
     const boundaryGeometry = new THREE.BufferGeometry();
     const vertices = new Float32Array([
       // Draw a square using lines
-      -MAP_SIZE/2, 0, -MAP_SIZE/2,  // Start at top-left
-      MAP_SIZE/2, 0, -MAP_SIZE/2,   // Top line
-      MAP_SIZE/2, 0, -MAP_SIZE/2,   // Start at top-right
-      MAP_SIZE/2, 0, MAP_SIZE/2,    // Right line
-      MAP_SIZE/2, 0, MAP_SIZE/2,    // Start at bottom-right
-      -MAP_SIZE/2, 0, MAP_SIZE/2,   // Bottom line
-      -MAP_SIZE/2, 0, MAP_SIZE/2,   // Start at bottom-left
-      -MAP_SIZE/2, 0, -MAP_SIZE/2   // Left line
+      -PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2,  // Start at top-left
+      PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2,   // Top line
+      PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2,   // Start at top-right
+      PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2,    // Right line
+      PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2,    // Start at bottom-right
+      -PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2,   // Bottom line
+      -PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2,   // Start at bottom-left
+      -PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2   // Left line
     ]);
     boundaryGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     const boundaryMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
     const boundaryLines = new THREE.LineSegments(boundaryGeometry, boundaryMaterial);
     boundaryLines.position.y = 0.2; // Slightly above ground to be visible
     scene.add(boundaryLines);
+    
+    // Add lane square outline
+    const laneSquareGeometry = new THREE.BufferGeometry();
+    const laneSquareVertices = new Float32Array([
+      // Draw a square using lines
+      -LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2,  // Start at top-left
+      LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2,   // Top line
+      LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2,   // Start at top-right
+      LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2,    // Right line
+      LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2,    // Start at bottom-right
+      -LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2,   // Bottom line
+      -LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2,   // Start at bottom-left
+      -LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2   // Left line
+    ]);
+    laneSquareGeometry.setAttribute('position', new THREE.Float32BufferAttribute(laneSquareVertices, 3));
+    const laneSquareMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa, linewidth: 1 });
+    const laneSquareLines = new THREE.LineSegments(laneSquareGeometry, laneSquareMaterial);
+    laneSquareLines.position.y = 0.15; // Slightly above ground but below the boundary
+    scene.add(laneSquareLines);
+    
+    // Add trees around the border to create a natural boundary
+    const borderTrees = new THREE.Group();
+    
+    // Function to check if a position is in the border area
+    const isInBorderArea = (x: number, z: number) => {
+      const absX = Math.abs(x);
+      const absZ = Math.abs(z);
+      const laneHalf = LANE_SQUARE_SIZE / 2;
+      const playableHalf = PLAYABLE_AREA / 2;
+      
+      // Check if the position is outside the lane square but inside the playable area
+      return (absX > laneHalf - 5 && absX < playableHalf) || 
+             (absZ > laneHalf - 5 && absZ < playableHalf);
+    };
+    
+    // Add dense trees around the border
+    for (let i = -PLAYABLE_AREA/2; i <= PLAYABLE_AREA/2; i += 5) {
+      for (let j = -PLAYABLE_AREA/2; j <= PLAYABLE_AREA/2; j += 5) {
+        if (isInBorderArea(i, j) && Math.random() < 0.7) { // 70% chance to place a tree in border area
+          const treePosition = new THREE.Vector3(i, 0, j);
+          const treeScale = 0.8 + Math.random() * 0.4; // Random scale between 0.8 and 1.2
+          const tree = createTree(treePosition);
+          tree.scale.set(treeScale, treeScale, treeScale);
+          borderTrees.add(tree);
+        }
+      }
+    }
+    
+    scene.add(borderTrees);
 
     // Mouse movement and pointer lock
     let euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -332,7 +382,7 @@ const BaseScene = () => {
       return;
     };
     
-    // Add right-click handler for movement
+    // Update right-click handler for movement
     const onMouseClick = (event: MouseEvent) => {
       if (event.button !== 2 || !isControlsEnabled) return; // Only handle right click
       
@@ -352,9 +402,9 @@ const BaseScene = () => {
       const intersectionPoint = new THREE.Vector3();
       raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
       
-      // Clamp the target position within map boundaries
-      intersectionPoint.x = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, intersectionPoint.x));
-      intersectionPoint.z = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, intersectionPoint.z));
+      // Clamp the target position within playable area boundaries
+      intersectionPoint.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, intersectionPoint.x));
+      intersectionPoint.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, intersectionPoint.z));
       
       // Set new target position
       character.targetPosition = intersectionPoint;
@@ -405,9 +455,9 @@ const BaseScene = () => {
       const newX = character.position.x + character.direction.x * moveSpeed;
       const newZ = character.position.z + character.direction.z * moveSpeed;
       
-      // Clamp position within map boundaries
-      character.position.x = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, newX));
-      character.position.z = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, newZ));
+      // Clamp position within playable area boundaries
+      character.position.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newX));
+      character.position.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newZ));
       character.model.position.set(character.position.x, character.position.y + 1, character.position.z);
       
       // Update camera position to follow character
@@ -418,10 +468,10 @@ const BaseScene = () => {
       
       // If character hits boundary, clear target position
       if (
-        character.position.x === -MAP_SIZE/2 || 
-        character.position.x === MAP_SIZE/2 ||
-        character.position.z === -MAP_SIZE/2 || 
-        character.position.z === MAP_SIZE/2
+        character.position.x === -PLAYABLE_AREA/2 || 
+        character.position.x === PLAYABLE_AREA/2 ||
+        character.position.z === -PLAYABLE_AREA/2 || 
+        character.position.z === PLAYABLE_AREA/2
       ) {
         character.targetPosition = null;
         character.direction.set(0, 0, 0);
@@ -535,7 +585,7 @@ const BaseScene = () => {
       {/* Add Minimap component */}
       <Minimap 
         playerPosition={playerPos} 
-        mapSize={MAP_SIZE} 
+        mapSize={LANE_SQUARE_SIZE} 
         lanes={[]}
       />
     </div>
