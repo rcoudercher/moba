@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { KeyBinding, defaultKeyBindings } from '../../config/keyBindings';
 import Minimap from './Minimap';
@@ -7,6 +7,16 @@ import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 
 // Import environment components
 import { createSky } from './environment/Sky';
+
+// Define interfaces for game objects with health
+interface GameObjectWithHealth {
+  health: number;
+  maxHealth: number;
+  healthBar?: THREE.Group;
+  takeDamage: (amount: number) => void;
+  updateHealthBar: () => void;
+  isDestroyed: boolean;
+}
 
 // Function to create a simple tree
 const createTree = (position: THREE.Vector3): THREE.Group => {
@@ -118,8 +128,54 @@ const createLane = (start: THREE.Vector3, end: THREE.Vector3, width: number): TH
   }
 };
 
-const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group => {
-  const base = new THREE.Group();
+// Function to create a health bar
+const createHealthBar = (width: number, height: number, position: THREE.Vector3, yOffset: number): THREE.Group => {
+  const group = new THREE.Group();
+  
+  // Background bar (gray)
+  const bgGeometry = new THREE.PlaneGeometry(width, height);
+  const bgMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0x444444,
+    side: THREE.DoubleSide
+  });
+  const bgBar = new THREE.Mesh(bgGeometry, bgMaterial);
+  
+  // Health bar (green)
+  const healthGeometry = new THREE.PlaneGeometry(width, height);
+  const healthMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0x00ff00,
+    side: THREE.DoubleSide
+  });
+  const healthBar = new THREE.Mesh(healthGeometry, healthMaterial);
+  
+  // Position the bars
+  bgBar.position.set(0, 0, 0.01); // Slightly in front to avoid z-fighting
+  healthBar.position.set(0, 0, 0);
+  
+  // Add to group
+  group.add(bgBar);
+  group.add(healthBar);
+  
+  // Position the group
+  group.position.copy(position);
+  group.position.y += yOffset;
+  
+  // Rotate to face up
+  group.rotation.x = -Math.PI / 2;
+  
+  // Store reference to the health bar for updates
+  group.userData.healthBar = healthBar;
+  
+  return group;
+};
+
+const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group & GameObjectWithHealth => {
+  const base = new THREE.Group() as THREE.Group & GameObjectWithHealth;
+  
+  // Set health properties
+  base.health = 1000;
+  base.maxHealth = 1000;
+  base.isDestroyed = false;
   
   // Main structure - larger size but still low to the ground
   const baseGeometry = new THREE.CylinderGeometry(18, 22, 3, 8);
@@ -147,6 +203,126 @@ const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group => {
   platform.castShadow = true;
   platform.receiveShadow = true;
   base.add(platform);
+  
+  // Add central objective structure (the main target to destroy)
+  const objectiveGeometry = new THREE.CylinderGeometry(3, 3, 8, 8);
+  const objectiveMaterial = new THREE.MeshStandardMaterial({
+    color: isEnemy ? 0xff0000 : 0x0000ff,
+    emissive: isEnemy ? 0x330000 : 0x000033,
+    roughness: 0.3,
+    metalness: 0.7
+  });
+  const objective = new THREE.Mesh(objectiveGeometry, objectiveMaterial);
+  objective.position.copy(position);
+  objective.position.y = 7; // Tall structure rising from the platform
+  objective.castShadow = true;
+  objective.receiveShadow = true;
+  
+  // Add glowing crystal on top of the objective
+  const crystalGeometry = new THREE.OctahedronGeometry(1.5, 1);
+  const crystalMaterial = new THREE.MeshStandardMaterial({
+    color: isEnemy ? 0xff3333 : 0x3333ff,
+    emissive: isEnemy ? 0xff0000 : 0x0000ff,
+    emissiveIntensity: 0.5,
+    roughness: 0.2,
+    metalness: 0.8
+  });
+  const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
+  crystal.position.copy(position);
+  crystal.position.y = 12; // On top of the objective
+  crystal.castShadow = true;
+  crystal.rotation.y = Math.PI / 4; // Rotate for better appearance
+  
+  // Add a point light inside the crystal for glow effect
+  const crystalLight = new THREE.PointLight(isEnemy ? 0xff0000 : 0x0000ff, 1, 20);
+  crystalLight.position.copy(position);
+  crystalLight.position.y = 12;
+  
+  base.add(objective);
+  base.add(crystal);
+  base.add(crystalLight);
+  
+  // Create and add health bar
+  const healthBarWidth = 10;
+  const healthBarHeight = 1;
+  const healthBarYOffset = 15; // Position above the crystal
+  base.healthBar = createHealthBar(healthBarWidth, healthBarHeight, position, healthBarYOffset);
+  base.add(base.healthBar);
+  
+  // Add methods for health management
+  base.takeDamage = (amount: number) => {
+    if (base.isDestroyed) return;
+    
+    base.health -= amount;
+    if (base.health <= 0) {
+      base.health = 0;
+      base.isDestroyed = true;
+      
+      // Handle destruction
+      crystal.visible = false;
+      crystalLight.visible = false;
+      
+      // Create explosion effect
+      const explosionGeometry = new THREE.SphereGeometry(5, 32, 32);
+      const explosionMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffff00,
+        transparent: true,
+        opacity: 0.8
+      });
+      const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
+      explosion.position.copy(position);
+      explosion.position.y = 7;
+      base.add(explosion);
+      
+      // Animate explosion and fade out
+      let scale = 1;
+      const expandExplosion = () => {
+        if (scale < 3) {
+          scale += 0.1;
+          explosion.scale.set(scale, scale, scale);
+          explosion.material.opacity -= 0.02;
+          requestAnimationFrame(expandExplosion);
+        } else {
+          base.remove(explosion);
+        }
+      };
+      expandExplosion();
+      
+      // Make objective look damaged
+      objective.material.color.set(0x555555);
+      objective.material.emissive.set(0x000000);
+      objective.scale.y = 0.5; // Collapse it a bit
+      objective.position.y = 5; // Lower it
+    }
+    
+    base.updateHealthBar();
+  };
+  
+  base.updateHealthBar = () => {
+    if (!base.healthBar) return;
+    
+    const healthPercent = base.health / base.maxHealth;
+    const healthBar = base.healthBar.userData.healthBar as THREE.Mesh;
+    
+    // Update health bar scale
+    healthBar.scale.x = Math.max(0.001, healthPercent); // Avoid zero scale
+    
+    // Update health bar color based on health percentage
+    const healthBarMaterial = healthBar.material as THREE.MeshBasicMaterial;
+    if (healthPercent > 0.6) {
+      healthBarMaterial.color.set(0x00ff00); // Green
+    } else if (healthPercent > 0.3) {
+      healthBarMaterial.color.set(0xffff00); // Yellow
+    } else {
+      healthBarMaterial.color.set(0xff0000); // Red
+    }
+    
+    // Position the health bar to align left
+    healthBar.position.x = (healthBarWidth / 2) * (healthPercent - 1);
+  };
+  
+  // Initialize health bar
+  base.updateHealthBar();
   
   return base;
 };
@@ -183,12 +359,94 @@ const BaseScene = () => {
     const savedBindings = localStorage.getItem('keyBindings');
     return savedBindings ? JSON.parse(savedBindings) : defaultKeyBindings;
   });
+  const [gameState, setGameState] = useState({
+    allyBaseHealth: 1000,
+    enemyBaseHealth: 1000,
+    gameOver: false,
+    winner: null as 'ally' | 'enemy' | null
+  });
+  
+  // Reference to store the bases for resetting
+  const basesRef = useRef<{
+    allyBase?: THREE.Group & GameObjectWithHealth,
+    enemyBase?: THREE.Group & GameObjectWithHealth
+  }>({});
+  
+  // Function to reset the game
+  const resetGame = useCallback(() => {
+    // Reset game state
+    setGameState({
+      allyBaseHealth: 1000,
+      enemyBaseHealth: 1000,
+      gameOver: false,
+      winner: null
+    });
+    
+    // Reset bases if they exist
+    if (basesRef.current.allyBase) {
+      basesRef.current.allyBase.health = 1000;
+      basesRef.current.allyBase.isDestroyed = false;
+      basesRef.current.allyBase.updateHealthBar();
+      
+      // Find and restore crystal and objective
+      basesRef.current.allyBase.children.forEach(child => {
+        // Restore crystal
+        if (child.type === 'Mesh' && (child as THREE.Mesh).geometry.type === 'OctahedronGeometry') {
+          child.visible = true;
+        }
+        // Restore objective
+        if (child.type === 'Mesh' && 
+            (child as THREE.Mesh).geometry.type === 'CylinderGeometry' && 
+            child.position.y > 5) {
+          const objective = child as THREE.Mesh;
+          const material = objective.material as THREE.MeshStandardMaterial;
+          material.color.set(0x0000ff);
+          material.emissive.set(0x000033);
+          objective.scale.y = 1;
+          objective.position.y = 7;
+        }
+        // Restore light
+        if (child.type === 'PointLight') {
+          child.visible = true;
+        }
+      });
+    }
+    
+    if (basesRef.current.enemyBase) {
+      basesRef.current.enemyBase.health = 1000;
+      basesRef.current.enemyBase.isDestroyed = false;
+      basesRef.current.enemyBase.updateHealthBar();
+      
+      // Find and restore crystal and objective
+      basesRef.current.enemyBase.children.forEach(child => {
+        // Restore crystal
+        if (child.type === 'Mesh' && (child as THREE.Mesh).geometry.type === 'OctahedronGeometry') {
+          child.visible = true;
+        }
+        // Restore objective
+        if (child.type === 'Mesh' && 
+            (child as THREE.Mesh).geometry.type === 'CylinderGeometry' && 
+            child.position.y > 5) {
+          const objective = child as THREE.Mesh;
+          const material = objective.material as THREE.MeshStandardMaterial;
+          material.color.set(0xff0000);
+          material.emissive.set(0x330000);
+          objective.scale.y = 1;
+          objective.position.y = 7;
+        }
+        // Restore light
+        if (child.type === 'PointLight') {
+          child.visible = true;
+        }
+      });
+    }
+  }, []);
   
   // Define MAP_SIZE as a constant outside the useEffect
   const GAME_MAP_SIZE = 200; // Total size of the game map
-  const PLAYABLE_AREA = 180; // Size of the playable area
-  const LANE_SQUARE_SIZE = 160; // Size of the square formed by the lanes
-  const INNER_SQUARE_SIZE = 140; // Size of the inner square
+  const PLAYABLE_AREA = 175; // Size of the playable area
+  const LANE_SQUARE_SIZE = 145; // Size of the square formed by the lanes
+  const INNER_SQUARE_SIZE = 140; // Size of the inner square (kept for reference but not used)
   const baseInset = 10; // How much to move bases inward - moved to component level
   
   useEffect(() => {
@@ -337,29 +595,82 @@ const BaseScene = () => {
     };
     
     // Add square lane path (between lane square and inner square)
-    const squareLanePath = createLanePath(LANE_SQUARE_SIZE, INNER_SQUARE_SIZE);
-    scene.add(squareLanePath);
+    // Removed the squareLanePath mesh to eliminate the brown mesh on top and bottom lanes
+    // const squareLanePath = createLanePath(LANE_SQUARE_SIZE, INNER_SQUARE_SIZE);
+    // scene.add(squareLanePath);
     
     // Create map structure
     const mapStructure = new THREE.Group();
     
-    // Create bases - position them more inside the map boundaries
-    // Ally base at bottom left, enemy base at top right
-    const allyBase = createBase(new THREE.Vector3(-LANE_SQUARE_SIZE/2 + baseInset, 0, LANE_SQUARE_SIZE/2 - baseInset), false); // Bottom left
-    const enemyBase = createBase(new THREE.Vector3(LANE_SQUARE_SIZE/2 - baseInset, 0, -LANE_SQUARE_SIZE/2 + baseInset), true); // Top right
+    // Calculate the intersection points of the diagonals with the lane square
+    // For ally base (bottom-left intersection)
+    const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
+    
+    // For enemy base (top-right intersection)
+    const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
+    
+    // Create bases - position them at the intersections of the diagonals with the lane square
+    const allyBase = createBase(allyBasePos, false); // Bottom left
+    const enemyBase = createBase(enemyBasePos, true); // Top right
     mapStructure.add(allyBase, enemyBase);
+    
+    // Store references to bases for resetting
+    basesRef.current.allyBase = allyBase;
+    basesRef.current.enemyBase = enemyBase;
     
     // Set base coordinates for debug display
     setBaseCoordinates({
       ally: { 
-        x: -LANE_SQUARE_SIZE/2 + baseInset, 
-        y: LANE_SQUARE_SIZE/2 - baseInset // Bottom left in 2D coordinates
+        x: allyBasePos.x, 
+        y: allyBasePos.z // Bottom left in 2D coordinates
       },
       enemy: { 
-        x: LANE_SQUARE_SIZE/2 - baseInset, 
-        y: -LANE_SQUARE_SIZE/2 + baseInset // Top right in 2D coordinates
+        x: enemyBasePos.x, 
+        y: enemyBasePos.z // Top right in 2D coordinates
       }
     });
+    
+    // Function to test damage on bases (for demonstration)
+    const testDamage = () => {
+      // Only for testing - in a real game, damage would come from player attacks
+      if (Math.random() > 0.5) {
+        allyBase.takeDamage(Math.random() * 10);
+        setGameState(prev => ({
+          ...prev,
+          allyBaseHealth: allyBase.health
+        }));
+      } else {
+        enemyBase.takeDamage(Math.random() * 10);
+        setGameState(prev => ({
+          ...prev,
+          enemyBaseHealth: enemyBase.health
+        }));
+      }
+      
+      // Check for game over
+      if (allyBase.isDestroyed) {
+        setGameState(prev => ({
+          ...prev,
+          gameOver: true,
+          winner: 'enemy'
+        }));
+      } else if (enemyBase.isDestroyed) {
+        setGameState(prev => ({
+          ...prev,
+          gameOver: true,
+          winner: 'ally'
+        }));
+      }
+    };
+    
+    // Add event listener for testing damage (press 'D' key)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'd' || event.key === 'D') {
+        testDamage();
+      }
+    };
+    
+    window.addEventListener('keydown', onKeyDown);
     
     scene.add(mapStructure);
     
@@ -396,36 +707,70 @@ const BaseScene = () => {
       -LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2   // Left line
     ]);
     laneSquareGeometry.setAttribute('position', new THREE.Float32BufferAttribute(laneSquareVertices, 3));
-    const laneSquareMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1 });
+    const laneSquareMaterial = new THREE.LineDashedMaterial({ 
+      color: 0xff0000, 
+      linewidth: 2,
+      dashSize: 3,
+      gapSize: 2
+    });
     const laneSquareLines = new THREE.LineSegments(laneSquareGeometry, laneSquareMaterial);
-    laneSquareLines.position.y = 0.15; // Slightly above ground but below the boundary
+    laneSquareLines.position.y = 0.25; // Same height as the diagonal red lines
+    
+    // Compute line distances for dashed lines
+    laneSquareLines.computeLineDistances();
+    
     scene.add(laneSquareLines);
 
-    // Add inner square outline (130x130)
-    const innerSquareGeometry = new THREE.BufferGeometry();
-    const innerSquareVertices = new Float32Array([
+    // Add inner cyan square outline (5 units inside lane square)
+    const innerCyanSize = LANE_SQUARE_SIZE - 10; // 5 units on each side
+    const innerCyanGeometry = new THREE.BufferGeometry();
+    const innerCyanVertices = new Float32Array([
       // Draw a square using lines
-      -INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2,  // Start at top-left
-      INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2,   // Top line
-      INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2,   // Start at top-right
-      INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,    // Right line
-      INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,    // Start at bottom-right
-      -INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,   // Bottom line
-      -INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,   // Start at bottom-left
-      -INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2   // Left line
+      -innerCyanSize/2, 0, -innerCyanSize/2,  // Start at top-left
+      innerCyanSize/2, 0, -innerCyanSize/2,   // Top line
+      innerCyanSize/2, 0, -innerCyanSize/2,   // Start at top-right
+      innerCyanSize/2, 0, innerCyanSize/2,    // Right line
+      innerCyanSize/2, 0, innerCyanSize/2,    // Start at bottom-right
+      -innerCyanSize/2, 0, innerCyanSize/2,   // Bottom line
+      -innerCyanSize/2, 0, innerCyanSize/2,   // Start at bottom-left
+      -innerCyanSize/2, 0, -innerCyanSize/2   // Left line
     ]);
-    innerSquareGeometry.setAttribute('position', new THREE.Float32BufferAttribute(innerSquareVertices, 3));
-    const innerSquareMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
-    const innerSquareLines = new THREE.LineSegments(innerSquareGeometry, innerSquareMaterial);
-    innerSquareLines.position.y = 0.17; // Between lane square and boundary
-    scene.add(innerSquareLines);
+    innerCyanGeometry.setAttribute('position', new THREE.Float32BufferAttribute(innerCyanVertices, 3));
+    const innerCyanMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
+    const innerCyanLines = new THREE.LineSegments(innerCyanGeometry, innerCyanMaterial);
+    innerCyanLines.position.y = 0.16; // Slightly above the lane square lines
+    scene.add(innerCyanLines);
+
+    // Add outer cyan square outline (5 units outside lane square)
+    const outerCyanSize = LANE_SQUARE_SIZE + 10; // 5 units on each side
+    const outerCyanGeometry = new THREE.BufferGeometry();
+    const outerCyanVertices = new Float32Array([
+      // Draw a square using lines
+      -outerCyanSize/2, 0, -outerCyanSize/2,  // Start at top-left
+      outerCyanSize/2, 0, -outerCyanSize/2,   // Top line
+      outerCyanSize/2, 0, -outerCyanSize/2,   // Start at top-right
+      outerCyanSize/2, 0, outerCyanSize/2,    // Right line
+      outerCyanSize/2, 0, outerCyanSize/2,    // Start at bottom-right
+      -outerCyanSize/2, 0, outerCyanSize/2,   // Bottom line
+      -outerCyanSize/2, 0, outerCyanSize/2,   // Start at bottom-left
+      -outerCyanSize/2, 0, -outerCyanSize/2   // Left line
+    ]);
+    outerCyanGeometry.setAttribute('position', new THREE.Float32BufferAttribute(outerCyanVertices, 3));
+    const outerCyanMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
+    const outerCyanLines = new THREE.LineSegments(outerCyanGeometry, outerCyanMaterial);
+    outerCyanLines.position.y = 0.16; // Slightly above the lane square lines
+    scene.add(outerCyanLines);
 
     // Add cross lines across the map
     const crossLinesGeometry = new THREE.BufferGeometry();
     const crossVertices = new Float32Array([
-      // First diagonal line (bottom-left to top-right)
-      -LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2,  // Start at bottom-left
-      LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2,  // End at top-right
+      // First diagonal line (bottom-left to top-right) - extended to map corners
+      -PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2,  // Start at bottom-left map corner
+      PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2,  // End at top-right map corner
+      
+      // Second diagonal line (top-left to bottom-right) - extended to map corners
+      -PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2,  // Start at top-left map corner
+      PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2,    // End at bottom-right map corner
     ]);
     crossLinesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(crossVertices, 3));
     const crossLinesMaterial = new THREE.LineDashedMaterial({ 
@@ -440,7 +785,7 @@ const BaseScene = () => {
     // Compute line distances for dashed lines
     crossLines.computeLineDistances();
     
-    scene.add(crossLines); // Add the diagonal line
+    scene.add(crossLines); // Add the diagonal lines
 
     // Add parallel blue lines to create bands around the diagonals
     const createParallelLine = (startPoint: THREE.Vector3, endPoint: THREE.Vector3, offset: number): THREE.Line => {
@@ -461,24 +806,36 @@ const BaseScene = () => {
       return new THREE.Line(geometry, material);
     };
     
-    // Diagonal (bottom-left to top-right)
-    const diagStart = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
-    const diagEnd = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
+    // Diagonal (bottom-left to top-right) - extended to map corners
+    const diagStart = new THREE.Vector3(-PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2);
+    const diagEnd = new THREE.Vector3(PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2);
+    
+    // Second diagonal (top-left to bottom-right) - extended to map corners
+    const diag2Start = new THREE.Vector3(-PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2);
+    const diag2End = new THREE.Vector3(PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2);
     
     // Create parallel lines (5 units on each side for a total width of 10)
     const offset = 5;
     
-    // Parallel lines for the diagonal
+    // Parallel lines for the first diagonal
     const diagLine1 = createParallelLine(diagStart, diagEnd, offset);
     const diagLine2 = createParallelLine(diagStart, diagEnd, -offset);
+    
+    // Parallel lines for the second diagonal
+    const diag2Line1 = createParallelLine(diag2Start, diag2End, offset);
+    const diag2Line2 = createParallelLine(diag2Start, diag2End, -offset);
     
     // Position slightly above ground but below the red lines
     diagLine1.position.y = 0.22;
     diagLine2.position.y = 0.22;
+    diag2Line1.position.y = 0.22;
+    diag2Line2.position.y = 0.22;
     
     // Add to scene
     scene.add(diagLine1);
     scene.add(diagLine2);
+    scene.add(diag2Line1);
+    scene.add(diag2Line2);
 
     // Create diagonal lane path
     const createDiagonalLanePath = (start: THREE.Vector3, end: THREE.Vector3, width: number, y: number = 0.05): THREE.Mesh => {
@@ -599,9 +956,41 @@ const BaseScene = () => {
       const newX = character.position.x + character.direction.x * moveSpeed;
       const newZ = character.position.z + character.direction.z * moveSpeed;
       
-      // Clamp position within playable area boundaries
+      // Create a new potential position
+      const newPosition = new THREE.Vector3(newX, character.position.y, newZ);
+      
+      // Check for collisions with bases
+      const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
+      const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
+      
+      // Calculate distance to base centers
+      const distToAllyBase = new THREE.Vector2(newPosition.x - allyBasePos.x, newPosition.z - allyBasePos.z).length();
+      const distToEnemyBase = new THREE.Vector2(newPosition.x - enemyBasePos.x, newPosition.z - enemyBasePos.z).length();
+      
+      // Base properties
+      const baseRadius = 18; // Radius of the base platform
+      const baseHeight = 3.25; // Height of the base platform
+      
+      // Determine if character is on a base and adjust height
+      let characterHeight = 0;
+      
+      // Check if on ally base
+      if (distToAllyBase < baseRadius) {
+        // Character is on the ally base - adjust height
+        characterHeight = baseHeight;
+      }
+      // Check if on enemy base
+      else if (distToEnemyBase < baseRadius) {
+        // Character is on the enemy base - adjust height
+        characterHeight = baseHeight;
+      }
+      
+      // Update position - always allow movement, just adjust height when on a base
       character.position.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newX));
       character.position.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newZ));
+      character.position.y = characterHeight; // Set height based on whether on a base
+      
+      // Update character model position
       character.model.position.set(character.position.x, character.position.y + 1, character.position.z);
       
       // Update camera position to follow character
@@ -656,8 +1045,9 @@ const BaseScene = () => {
       window.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('resize', onWindowResize);
       mountRef.current?.removeChild(renderer.domElement);
+      window.removeEventListener('keydown', onKeyDown);
     };
-  }, [keyBindings]);
+  }, [keyBindings, resetGame]);
   
   return (
     <div 
@@ -778,6 +1168,92 @@ const BaseScene = () => {
           textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
         }}>
           Playable Area: {PLAYABLE_AREA}x{PLAYABLE_AREA}
+        </div>
+      </div>
+      
+      {/* Game over message with restart button */}
+      {gameState.gameOver && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          color: 'white',
+          fontSize: '36px',
+          fontWeight: 'bold',
+          textAlign: 'center',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '20px 40px',
+          borderRadius: '10px',
+          textShadow: '2px 2px 4px rgba(0,0,0,0.5)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '20px'
+        }}>
+          <div>{gameState.winner === 'ally' ? 'Victory!' : 'Defeat!'}</div>
+          <button 
+            onClick={resetGame}
+            style={{
+              backgroundColor: '#4CAF50',
+              border: 'none',
+              color: 'white',
+              padding: '15px 32px',
+              textAlign: 'center',
+              textDecoration: 'none',
+              display: 'inline-block',
+              fontSize: '16px',
+              margin: '4px 2px',
+              cursor: 'pointer',
+              borderRadius: '8px',
+              fontWeight: 'bold',
+              boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+              transition: '0.3s'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.backgroundColor = '#45a049';
+              e.currentTarget.style.transform = 'scale(1.05)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.backgroundColor = '#4CAF50';
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            Restart Game
+          </button>
+        </div>
+      )}
+      
+      {/* Health status display */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '5px'
+      }}>
+        <div style={{
+          color: '#00ffff',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Ally Base: {Math.round(gameState.allyBaseHealth)} / 1000
+        </div>
+        <div style={{
+          color: '#ff5555',
+          fontSize: '16px',
+          fontFamily: 'monospace',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
+        }}>
+          Enemy Base: {Math.round(gameState.enemyBaseHealth)} / 1000
         </div>
       </div>
       
