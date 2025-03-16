@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { KeyBinding, defaultKeyBindings } from '../../config/keyBindings';
 import Minimap from './Minimap';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 
 // Import environment components
 import { createSky } from './environment/Sky';
@@ -186,6 +188,7 @@ const BaseScene = () => {
   const GAME_MAP_SIZE = 200; // Total size of the game map
   const PLAYABLE_AREA = 175; // Size of the playable area
   const LANE_SQUARE_SIZE = 150; // Size of the square formed by the lanes
+  const INNER_SQUARE_SIZE = 130; // Size of the inner square
   const baseInset = 10; // How much to move bases inward - moved to component level
   
   useEffect(() => {
@@ -354,10 +357,29 @@ const BaseScene = () => {
       -LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2   // Left line
     ]);
     laneSquareGeometry.setAttribute('position', new THREE.Float32BufferAttribute(laneSquareVertices, 3));
-    const laneSquareMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa, linewidth: 1 });
+    const laneSquareMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1 });
     const laneSquareLines = new THREE.LineSegments(laneSquareGeometry, laneSquareMaterial);
     laneSquareLines.position.y = 0.15; // Slightly above ground but below the boundary
     scene.add(laneSquareLines);
+
+    // Add inner square outline (130x130)
+    const innerSquareGeometry = new THREE.BufferGeometry();
+    const innerSquareVertices = new Float32Array([
+      // Draw a square using lines
+      -INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2,  // Start at top-left
+      INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2,   // Top line
+      INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2,   // Start at top-right
+      INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,    // Right line
+      INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,    // Start at bottom-right
+      -INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,   // Bottom line
+      -INNER_SQUARE_SIZE/2, 0, INNER_SQUARE_SIZE/2,   // Start at bottom-left
+      -INNER_SQUARE_SIZE/2, 0, -INNER_SQUARE_SIZE/2   // Left line
+    ]);
+    innerSquareGeometry.setAttribute('position', new THREE.Float32BufferAttribute(innerSquareVertices, 3));
+    const innerSquareMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
+    const innerSquareLines = new THREE.LineSegments(innerSquareGeometry, innerSquareMaterial);
+    innerSquareLines.position.y = 0.17; // Between lane square and boundary
+    scene.add(innerSquareLines);
 
     // Add cross lines across the map
     const crossLinesGeometry = new THREE.BufferGeometry();
@@ -371,10 +393,69 @@ const BaseScene = () => {
       -GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2    // End at bottom-left
     ]);
     crossLinesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(crossVertices, 3));
-    const crossLinesMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    const crossLinesMaterial = new THREE.LineDashedMaterial({ 
+      color: 0xff0000, 
+      linewidth: 2,
+      dashSize: 3,
+      gapSize: 2
+    });
     const crossLines = new THREE.LineSegments(crossLinesGeometry, crossLinesMaterial);
     crossLines.position.y = 0.25; // Slightly above other lines to be visible
+    
+    // Compute line distances for dashed lines
+    crossLines.computeLineDistances();
+    
     scene.add(crossLines);
+
+    // Add parallel blue lines to create bands around the diagonals
+    const createParallelLine = (startPoint: THREE.Vector3, endPoint: THREE.Vector3, offset: number): THREE.Line => {
+      // Calculate direction vector
+      const direction = new THREE.Vector3().subVectors(endPoint, startPoint).normalize();
+      
+      // Calculate perpendicular vector (in XZ plane)
+      const perpendicular = new THREE.Vector3(-direction.z, 0, direction.x).normalize().multiplyScalar(offset);
+      
+      // Create offset points
+      const offsetStart = new THREE.Vector3().addVectors(startPoint, perpendicular);
+      const offsetEnd = new THREE.Vector3().addVectors(endPoint, perpendicular);
+      
+      // Create geometry
+      const geometry = new THREE.BufferGeometry().setFromPoints([offsetStart, offsetEnd]);
+      const material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
+      
+      return new THREE.Line(geometry, material);
+    };
+    
+    // First diagonal (top-left to bottom-right)
+    const diag1Start = new THREE.Vector3(-GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2);
+    const diag1End = new THREE.Vector3(GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2);
+    
+    // Second diagonal (top-right to bottom-left)
+    const diag2Start = new THREE.Vector3(GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2);
+    const diag2End = new THREE.Vector3(-GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2);
+    
+    // Create parallel lines (5 units on each side for a total width of 10)
+    const offset = 5;
+    
+    // Parallel lines for first diagonal
+    const diag1Line1 = createParallelLine(diag1Start, diag1End, offset);
+    const diag1Line2 = createParallelLine(diag1Start, diag1End, -offset);
+    
+    // Parallel lines for second diagonal
+    const diag2Line1 = createParallelLine(diag2Start, diag2End, offset);
+    const diag2Line2 = createParallelLine(diag2Start, diag2End, -offset);
+    
+    // Position slightly above ground but below the red lines
+    diag1Line1.position.y = 0.22;
+    diag1Line2.position.y = 0.22;
+    diag2Line1.position.y = 0.22;
+    diag2Line2.position.y = 0.22;
+    
+    // Add to scene
+    scene.add(diag1Line1);
+    scene.add(diag1Line2);
+    scene.add(diag2Line1);
+    scene.add(diag2Line2);
 
     // Mouse movement and pointer lock
     let euler = new THREE.Euler(0, 0, 0, 'YXZ');
