@@ -7,16 +7,7 @@ import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 
 // Import environment components
 import { createSky } from './environment/Sky';
-
-// Define interfaces for game objects with health
-interface GameObjectWithHealth {
-  health: number;
-  maxHealth: number;
-  healthBar?: THREE.Group;
-  takeDamage: (amount: number) => void;
-  updateHealthBar: () => void;
-  isDestroyed: boolean;
-}
+import createTower, { Tower, GameObjectWithHealth } from './Tower';
 
 // Define interface for minions
 interface Minion extends THREE.Group {
@@ -340,62 +331,6 @@ const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group & Ga
   base.updateHealthBar();
   
   return base;
-};
-
-const createTower = (position: THREE.Vector3, isEnemy: boolean): THREE.Group => {
-  const tower = new THREE.Group();
-  
-  // Tower base
-  const baseGeometry = new THREE.CylinderGeometry(1, 1.5, 8, 8);
-  const baseMaterial = new THREE.MeshStandardMaterial({ 
-    color: isEnemy ? 0xdd0000 : 0x0000dd,
-    roughness: 0.6
-  });
-  const baseStructure = new THREE.Mesh(baseGeometry, baseMaterial);
-  baseStructure.position.copy(position);
-  baseStructure.position.y = 4;
-  baseStructure.castShadow = true;
-  baseStructure.receiveShadow = true;
-  
-  tower.add(baseStructure);
-  
-  // Add shooting range indicator (dotted yellow circle)
-  const shootingRange = 15; // Range in units
-  const segments = 64;
-  const rangeGeometry = new THREE.BufferGeometry();
-  
-  // Create circle points
-  const points = [];
-  for (let i = 0; i <= segments; i++) {
-    const theta = (i / segments) * Math.PI * 2;
-    const x = shootingRange * Math.cos(theta);
-    const z = shootingRange * Math.sin(theta);
-    points.push(new THREE.Vector3(x, 0, z));
-  }
-  
-  rangeGeometry.setFromPoints(points);
-  
-  // Create dotted yellow line material
-  const rangeMaterial = new THREE.LineDashedMaterial({
-    color: 0xffff00,
-    dashSize: 1,
-    gapSize: 0.5,
-    linewidth: 1
-  });
-  
-  const rangeIndicator = new THREE.Line(rangeGeometry, rangeMaterial);
-  rangeIndicator.position.copy(position);
-  rangeIndicator.position.y = 0.2; // Slightly above ground
-  
-  // Compute line distances for dashed lines
-  rangeIndicator.computeLineDistances();
-  
-  // Store shooting range in userData for game logic
-  tower.userData.shootingRange = shootingRange;
-  
-  tower.add(rangeIndicator);
-  
-  return tower;
 };
 
 const BaseScene = () => {
@@ -759,24 +694,46 @@ const BaseScene = () => {
     // Add ally tower on the middle lane, just before the inner cyan square
     const towerDirection = new THREE.Vector3().subVectors(enemyBasePos, allyBasePos).normalize();
     const innerSquareRadius = (LANE_SQUARE_SIZE - 10) / 2; // Half of the inner cyan square size
-    const distanceFromCenter = innerSquareRadius + 5; // 5 units outside the inner cyan square
-    const allyTowerPos = new THREE.Vector3(
-      -towerDirection.x * distanceFromCenter,
+    
+    // Simplified tower positioning - just two positions per side
+    const outerTowerDistance = 29; // Further from center
+    const innerTowerDistance = 11; // Closer to center
+    
+    // Add first ally tower (outer)
+    const allyTower1Pos = new THREE.Vector3(
+      -towerDirection.x * outerTowerDistance,
       0,
-      -towerDirection.z * distanceFromCenter
+      -towerDirection.z * outerTowerDistance
     );
-    const allyTower = createTower(allyTowerPos, false); // false = ally (blue)
-    mapStructure.add(allyTower);
+    const allyTower1 = createTower(allyTower1Pos, false, 300); // false = ally (blue)
+    mapStructure.add(allyTower1);
 
-    // Add a second ally tower closer to the cyan square
-    const closerDistanceFromCenter = 20; // 20 units from the center of the map, a bit more towards blue side
+    // Add second ally tower (inner)
     const allyTower2Pos = new THREE.Vector3(
-      -towerDirection.x * closerDistanceFromCenter,
+      -towerDirection.x * innerTowerDistance,
       0,
-      -towerDirection.z * closerDistanceFromCenter
+      -towerDirection.z * innerTowerDistance
     );
-    const allyTower2 = createTower(allyTower2Pos, false); // false = ally (blue)
+    const allyTower2 = createTower(allyTower2Pos, false, 300); // false = ally (blue)
     mapStructure.add(allyTower2);
+
+    // Add first enemy tower (outer)
+    const enemyTower1Pos = new THREE.Vector3(
+      towerDirection.x * outerTowerDistance,
+      0,
+      towerDirection.z * outerTowerDistance
+    );
+    const enemyTower1 = createTower(enemyTower1Pos, true, 300); // true = enemy (red)
+    mapStructure.add(enemyTower1);
+
+    // Add second enemy tower (inner)
+    const enemyTower2Pos = new THREE.Vector3(
+      towerDirection.x * innerTowerDistance,
+      0,
+      towerDirection.z * innerTowerDistance
+    );
+    const enemyTower2 = createTower(enemyTower2Pos, true, 300); // true = enemy (red)
+    mapStructure.add(enemyTower2);
 
     // Store references to bases for resetting
     basesRef.current.allyBase = allyBase;
@@ -904,10 +861,21 @@ const BaseScene = () => {
       }
     };
     
+    // Function to test damage on towers (for demonstration)
+    const testTowerDamage = () => {
+      // Only for testing - in a real game, damage would come from player attacks
+      allyTower1.takeDamage(Math.random() * 30);
+      allyTower2.takeDamage(Math.random() * 30);
+      enemyTower1.takeDamage(Math.random() * 30);
+      enemyTower2.takeDamage(Math.random() * 30);
+    };
+    
     // Add event listener for testing damage (press 'D' key)
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'd' || event.key === 'D') {
         testDamage();
+      } else if (event.key === 't' || event.key === 'T') {
+        testTowerDamage();
       }
     };
     
