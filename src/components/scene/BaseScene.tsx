@@ -125,7 +125,7 @@ const BaseScene = () => {
   });
   
   // Define MAP_SIZE as a constant outside the useEffect
-  const MAP_SIZE = 100; // Square map size
+  const MAP_SIZE = 150; // Increased map size to match DOTA scale
   
   useEffect(() => {
     // Scene setup
