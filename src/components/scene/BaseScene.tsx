@@ -301,6 +301,45 @@ const BaseScene = () => {
     ground.receiveShadow = true;
     scene.add(ground);
     
+    // Create lane paths with brown color
+    // Create outer square lane (between lane square and inner square)
+    const createLanePath = (outerSize: number, innerSize: number, y: number = 0.05): THREE.Mesh => {
+      // Create outer and inner shapes for the lane
+      const outerShape = new THREE.Shape();
+      outerShape.moveTo(-outerSize/2, -outerSize/2);
+      outerShape.lineTo(outerSize/2, -outerSize/2);
+      outerShape.lineTo(outerSize/2, outerSize/2);
+      outerShape.lineTo(-outerSize/2, outerSize/2);
+      outerShape.lineTo(-outerSize/2, -outerSize/2);
+      
+      const innerShape = new THREE.Path();
+      innerShape.moveTo(-innerSize/2, -innerSize/2);
+      innerShape.lineTo(innerSize/2, -innerSize/2);
+      innerShape.lineTo(innerSize/2, innerSize/2);
+      innerShape.lineTo(-innerSize/2, innerSize/2);
+      innerShape.lineTo(-innerSize/2, -innerSize/2);
+      
+      outerShape.holes.push(innerShape);
+      
+      const geometry = new THREE.ShapeGeometry(outerShape);
+      const material = new THREE.MeshStandardMaterial({ 
+        color: 0x8B4513, // Brown color for lanes
+        roughness: 0.9,
+        metalness: 0.1
+      });
+      
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = y;
+      mesh.receiveShadow = true;
+      
+      return mesh;
+    };
+    
+    // Add square lane path (between lane square and inner square)
+    const squareLanePath = createLanePath(LANE_SQUARE_SIZE, INNER_SQUARE_SIZE);
+    scene.add(squareLanePath);
+    
     // Create map structure
     const mapStructure = new THREE.Group();
     
@@ -384,13 +423,9 @@ const BaseScene = () => {
     // Add cross lines across the map
     const crossLinesGeometry = new THREE.BufferGeometry();
     const crossVertices = new Float32Array([
-      // First diagonal line (top-left to bottom-right)
-      -GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2,  // Start at top-left
-      GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2,    // End at bottom-right
-      
-      // Second diagonal line (top-right to bottom-left)
-      GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2,   // Start at top-right
-      -GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2    // End at bottom-left
+      // First diagonal line (bottom-left to top-right)
+      -LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2,  // Start at bottom-left
+      LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2,  // End at top-right
     ]);
     crossLinesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(crossVertices, 3));
     const crossLinesMaterial = new THREE.LineDashedMaterial({ 
@@ -405,7 +440,7 @@ const BaseScene = () => {
     // Compute line distances for dashed lines
     crossLines.computeLineDistances();
     
-    scene.add(crossLines);
+    scene.add(crossLines); // Add the diagonal line
 
     // Add parallel blue lines to create bands around the diagonals
     const createParallelLine = (startPoint: THREE.Vector3, endPoint: THREE.Vector3, offset: number): THREE.Line => {
@@ -426,36 +461,60 @@ const BaseScene = () => {
       return new THREE.Line(geometry, material);
     };
     
-    // First diagonal (top-left to bottom-right)
-    const diag1Start = new THREE.Vector3(-GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2);
-    const diag1End = new THREE.Vector3(GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2);
-    
-    // Second diagonal (top-right to bottom-left)
-    const diag2Start = new THREE.Vector3(GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2);
-    const diag2End = new THREE.Vector3(-GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2);
+    // Diagonal (bottom-left to top-right)
+    const diagStart = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
+    const diagEnd = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
     
     // Create parallel lines (5 units on each side for a total width of 10)
     const offset = 5;
     
-    // Parallel lines for first diagonal
-    const diag1Line1 = createParallelLine(diag1Start, diag1End, offset);
-    const diag1Line2 = createParallelLine(diag1Start, diag1End, -offset);
-    
-    // Parallel lines for second diagonal
-    const diag2Line1 = createParallelLine(diag2Start, diag2End, offset);
-    const diag2Line2 = createParallelLine(diag2Start, diag2End, -offset);
+    // Parallel lines for the diagonal
+    const diagLine1 = createParallelLine(diagStart, diagEnd, offset);
+    const diagLine2 = createParallelLine(diagStart, diagEnd, -offset);
     
     // Position slightly above ground but below the red lines
-    diag1Line1.position.y = 0.22;
-    diag1Line2.position.y = 0.22;
-    diag2Line1.position.y = 0.22;
-    diag2Line2.position.y = 0.22;
+    diagLine1.position.y = 0.22;
+    diagLine2.position.y = 0.22;
     
     // Add to scene
-    scene.add(diag1Line1);
-    scene.add(diag1Line2);
-    scene.add(diag2Line1);
-    scene.add(diag2Line2);
+    scene.add(diagLine1);
+    scene.add(diagLine2);
+
+    // Create diagonal lane path
+    const createDiagonalLanePath = (start: THREE.Vector3, end: THREE.Vector3, width: number, y: number = 0.05): THREE.Mesh => {
+      // Calculate direction and length
+      const direction = new THREE.Vector3().subVectors(end, start).normalize();
+      const length = start.distanceTo(end);
+      
+      // Create lane geometry
+      const geometry = new THREE.PlaneGeometry(length, width);
+      const material = new THREE.MeshStandardMaterial({ 
+        color: 0x8B4513, // Brown color for lanes
+        roughness: 0.9,
+        metalness: 0.1,
+        side: THREE.DoubleSide
+      });
+      
+      const mesh = new THREE.Mesh(geometry, material);
+      
+      // Position at midpoint
+      const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+      mesh.position.copy(midpoint);
+      mesh.position.y = y;
+      
+      // Calculate rotation to align with direction
+      const angle = Math.atan2(direction.z, direction.x);
+      mesh.rotation.y = -angle + Math.PI / 2;
+      mesh.rotation.x = -Math.PI / 2;
+      
+      mesh.receiveShadow = true;
+      
+      return mesh;
+    };
+    
+    // Add diagonal lane path - commented out to remove the 3D mesh
+    // const diagPath = createDiagonalLanePath(diagStart, diagEnd, 10);
+    // scene.add(diagPath);
 
     // Mouse movement and pointer lock
     let euler = new THREE.Euler(0, 0, 0, 'YXZ');
