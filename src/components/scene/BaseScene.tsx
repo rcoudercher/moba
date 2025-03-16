@@ -61,10 +61,17 @@ const createLane = (start: THREE.Vector3, end: THREE.Vector3, width: number): TH
   lane.receiveShadow = true;
   
   // Position and rotate the lane
-  lane.position.copy(start).add(direction.multiplyScalar(0.5));
+  // Calculate the midpoint between start and end
+  const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+  lane.position.copy(midpoint);
   lane.position.y = 0.1; // Slightly above ground to prevent z-fighting
-  lane.rotation.x = -Math.PI / 2;
-  lane.rotation.z = -Math.atan2(direction.z, direction.x);
+  
+  // Rotate the lane to align with the direction
+  lane.rotation.x = -Math.PI / 2; // Make it flat on the ground
+  
+  // Calculate the angle between the direction vector and the x-axis
+  const angle = Math.atan2(direction.z, direction.x);
+  lane.rotation.z = -angle + Math.PI / 2; // Adjust rotation to align with direction
   
   return lane;
 };
@@ -242,30 +249,36 @@ const BaseScene = () => {
     );
     
     // Top lane (through corner)
-    const topLane = createLane(
-      new THREE.Vector3(-MAP_SIZE/2, 0, MAP_SIZE/2), // Start at ally base
-      new THREE.Vector3(-MAP_SIZE/2, 0, -MAP_SIZE/2), // Go to top left corner
+    // First segment: from ally base to top-left corner
+    const topLane1 = createLane(
+      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, MAP_SIZE/2), // Slightly offset from base
+      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, -MAP_SIZE/2 + 5), // Slightly offset from corner
       12
     );
+    
+    // Second segment: from top-left corner to enemy base
     const topLane2 = createLane(
-      new THREE.Vector3(-MAP_SIZE/2, 0, -MAP_SIZE/2),
-      new THREE.Vector3(MAP_SIZE/2, 0, -MAP_SIZE/2), // To enemy base
+      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, -MAP_SIZE/2 + 5), // Slightly offset from corner
+      new THREE.Vector3(MAP_SIZE/2, 0, -MAP_SIZE/2 + 5), // Slightly offset from enemy base
       12
     );
     
     // Bottom lane (through corner)
-    const botLane = createLane(
-      new THREE.Vector3(-MAP_SIZE/2, 0, MAP_SIZE/2), // Start at ally base
-      new THREE.Vector3(MAP_SIZE/2, 0, MAP_SIZE/2), // Go to bottom right corner
-      12
-    );
-    const botLane2 = createLane(
-      new THREE.Vector3(MAP_SIZE/2, 0, MAP_SIZE/2),
-      new THREE.Vector3(MAP_SIZE/2, 0, -MAP_SIZE/2), // To enemy base
+    // First segment: from ally base to bottom-right corner
+    const botLane1 = createLane(
+      new THREE.Vector3(-MAP_SIZE/2 + 5, 0, MAP_SIZE/2 - 5), // Slightly offset from base
+      new THREE.Vector3(MAP_SIZE/2 - 5, 0, MAP_SIZE/2 - 5), // Slightly offset from corner
       12
     );
     
-    mapStructure.add(midLane, topLane, topLane2, botLane, botLane2);
+    // Second segment: from bottom-right corner to enemy base
+    const botLane2 = createLane(
+      new THREE.Vector3(MAP_SIZE/2 - 5, 0, MAP_SIZE/2 - 5), // Slightly offset from corner
+      new THREE.Vector3(MAP_SIZE/2 - 5, 0, -MAP_SIZE/2), // Slightly offset from enemy base
+      12
+    );
+    
+    mapStructure.add(midLane, topLane1, topLane2, botLane1, botLane2);
     
     // Add towers along lanes
     const towerPositions = [
@@ -515,7 +528,7 @@ const BaseScene = () => {
           borderRadius: '8px',
           textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
         }}>
-          X: {Math.round(playerPos.x)} Y: {Math.round(playerPos.z)}
+          X: {Math.round(playerPos.x)} Y: {Math.round(-playerPos.z)}
         </div>
       </div>
       

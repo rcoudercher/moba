@@ -46,22 +46,22 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
       
       // Top lane (two segments)
       // Vertical part
-      const topStart = worldToMinimap(-mapSize/2, mapSize/2);
-      const topCorner = worldToMinimap(-mapSize/2, -mapSize/2);
+      const topStart = worldToMinimap(-mapSize/2 + 5, mapSize/2);
+      const topCorner = worldToMinimap(-mapSize/2 + 5, -mapSize/2 + 5);
       ctx.fillRect(topStart.x - 6, topStart.y, 12, topCorner.y - topStart.y);
       
       // Horizontal part
-      const topEnd = worldToMinimap(mapSize/2, -mapSize/2);
+      const topEnd = worldToMinimap(mapSize/2, -mapSize/2 + 5);
       ctx.fillRect(topCorner.x, topCorner.y - 6, topEnd.x - topCorner.x, 12);
       
       // Bottom lane (two segments)
       // Horizontal part
-      const botStart = worldToMinimap(-mapSize/2, mapSize/2);
-      const botCorner = worldToMinimap(mapSize/2, mapSize/2);
+      const botStart = worldToMinimap(-mapSize/2 + 5, mapSize/2 - 5);
+      const botCorner = worldToMinimap(mapSize/2 - 5, mapSize/2 - 5);
       ctx.fillRect(botStart.x, botStart.y - 6, botCorner.x - botStart.x, 12);
       
       // Vertical part
-      const botEnd = worldToMinimap(mapSize/2, -mapSize/2);
+      const botEnd = worldToMinimap(mapSize/2 - 5, -mapSize/2);
       ctx.fillRect(botCorner.x - 6, botCorner.y, 12, botEnd.y - botCorner.y);
       
       // Draw bases
