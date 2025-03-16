@@ -20,8 +20,8 @@ const Minimap: React.FC<MinimapProps> = ({ playerPosition, mapSize, lanes }) => 
     canvas.width = minimapSize;
     canvas.height = minimapSize;
     
-    // Define the playable area size (200)
-    const playableArea = 200;
+    // Define the playable area size (180)
+    const playableArea = 180;
     
     // Function to convert world coordinates to minimap coordinates
     const worldToMinimap = (x: number, z: number) => {

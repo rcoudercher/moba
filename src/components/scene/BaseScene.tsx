@@ -11,7 +11,7 @@ const createTree = (position: THREE.Vector3): THREE.Group => {
   const tree = new THREE.Group();
   
   // Tree trunk (brown cylinder)
-  const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 2, 8);
+  const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 2, 6);
   const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
   const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
   trunk.castShadow = true;
@@ -19,7 +19,7 @@ const createTree = (position: THREE.Vector3): THREE.Group => {
   tree.add(trunk);
   
   // Tree leaves (green cone)
-  const leavesGeometry = new THREE.ConeGeometry(1.5, 3, 8);
+  const leavesGeometry = new THREE.ConeGeometry(1.5, 3, 6);
   const leavesMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x2E8B57,
     roughness: 0.8
@@ -139,8 +139,8 @@ const BaseScene = () => {
   });
   
   // Define MAP_SIZE as a constant outside the useEffect
-  const LANE_SQUARE_SIZE = 150; // Size of the square formed by the lanes
-  const PLAYABLE_AREA = 200; // Size of the playable area
+  const LANE_SQUARE_SIZE = 160; // Size of the square formed by the lanes (increased from 150)
+  const PLAYABLE_AREA = 180; // Size of the playable area (reduced from 200)
   
   useEffect(() => {
     // Scene setup
@@ -157,7 +157,11 @@ const BaseScene = () => {
     camera.rotation.x = -Math.PI / 3; // Steeper angle for better map view
     
     // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: true, 
+      alpha: true,
+      powerPreference: 'high-performance'
+    });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
@@ -223,8 +227,8 @@ const BaseScene = () => {
     directionalLight.castShadow = true;
     
     // Optimize shadow map
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.mapSize.width = 1024;
+    directionalLight.shadow.mapSize.height = 1024;
     directionalLight.shadow.camera.near = 0.5;
     directionalLight.shadow.camera.far = 100;
     directionalLight.shadow.camera.left = -50;
@@ -371,12 +375,21 @@ const BaseScene = () => {
              (absZ > laneHalf - 5 && absZ < playableHalf);
     };
     
-    // Add dense trees around the border
-    for (let i = -PLAYABLE_AREA/2; i <= PLAYABLE_AREA/2; i += 5) {
-      for (let j = -PLAYABLE_AREA/2; j <= PLAYABLE_AREA/2; j += 5) {
-        if (isInBorderArea(i, j) && Math.random() < 0.7) { // 70% chance to place a tree in border area
+    // Create shared geometries for instancing
+    const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 2, 6);
+    const leavesGeometry = new THREE.ConeGeometry(1.5, 3, 6);
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const leavesMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x2E8B57,
+      roughness: 0.8
+    });
+    
+    // Add less dense trees around the border (increased spacing, reduced probability)
+    for (let i = -PLAYABLE_AREA/2; i <= PLAYABLE_AREA/2; i += 8) { // Increased spacing from 5 to 8
+      for (let j = -PLAYABLE_AREA/2; j <= PLAYABLE_AREA/2; j += 8) { // Increased spacing from 5 to 8
+        if (isInBorderArea(i, j) && Math.random() < 0.5) { // Reduced chance from 0.7 to 0.5
           const treePosition = new THREE.Vector3(i, 0, j);
-          const treeScale = 0.8 + Math.random() * 0.4; // Random scale between 0.8 and 1.2
+          const treeScale = 0.8 + Math.random() * 0.4;
           const tree = createTree(treePosition);
           tree.scale.set(treeScale, treeScale, treeScale);
           borderTrees.add(tree);
