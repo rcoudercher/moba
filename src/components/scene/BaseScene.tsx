@@ -183,8 +183,9 @@ const BaseScene = () => {
   });
   
   // Define MAP_SIZE as a constant outside the useEffect
-  const LANE_SQUARE_SIZE = 160; // Size of the square formed by the lanes (increased from 150)
-  const PLAYABLE_AREA = 180; // Size of the playable area (reverted back from 160)
+  const GAME_MAP_SIZE = 200; // Total size of the game map
+  const PLAYABLE_AREA = 175; // Size of the playable area
+  const LANE_SQUARE_SIZE = 150; // Size of the square formed by the lanes
   const baseInset = 10; // How much to move bases inward - moved to component level
   
   useEffect(() => {
@@ -284,132 +285,13 @@ const BaseScene = () => {
     
     scene.add(directionalLight);
     
-    // Create a canvas for the ground texture
-    const createGroundTexture = () => {
-      const textureSize = 2048; // High resolution texture
-      const canvas = document.createElement('canvas');
-      canvas.width = textureSize;
-      canvas.height = textureSize;
-      const ctx = canvas.getContext('2d');
-      
-      if (!ctx) return null;
-      
-      // Fill background with dark green (jungle)
-      ctx.fillStyle = '#1a472a';
-      ctx.fillRect(0, 0, textureSize, textureSize);
-      
-      // Calculate pixel positions
-      const halfSize = textureSize / 2;
-      const laneSquareSize = (LANE_SQUARE_SIZE / PLAYABLE_AREA) * textureSize;
-      const halfLaneSquare = laneSquareSize / 2;
-      const baseInsetPixels = (baseInset / PLAYABLE_AREA) * textureSize;
-      const laneWidth = (8 / PLAYABLE_AREA) * textureSize; // Reduced lane width from 12 to 8
-      
-      // Draw lanes with dirt road color
-      ctx.fillStyle = '#6B4226'; // Dark brown for dirt roads
-      
-      // Helper to convert world coordinates to texture coordinates
-      const worldToTexture = (x: number, z: number) => {
-        // This was incorrectly mapping coordinates - fix to ensure lanes stay within white square
-        const textureX = halfSize + (x / PLAYABLE_AREA) * textureSize;
-        const textureY = halfSize + (z / PLAYABLE_AREA) * textureSize;
-        return { x: textureX, y: textureY };
-      };
-      
-      // Draw mid lane (diagonal)
-      const allyBasePos = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, LANE_SQUARE_SIZE/2 - baseInset);
-      const enemyBasePos = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
-      
-      // Draw diagonal line with width
-      ctx.beginPath();
-      ctx.moveTo(allyBasePos.x, allyBasePos.y);
-      ctx.lineTo(enemyBasePos.x, enemyBasePos.y);
-      ctx.lineWidth = laneWidth;
-      ctx.strokeStyle = '#6B4226';
-      ctx.stroke();
-      
-      // Draw top lane (L-shape)
-      // Vertical part - ensure it stays within lane square
-      const topStart = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, LANE_SQUARE_SIZE/2 - baseInset);
-      const topCorner = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
-      
-      ctx.beginPath();
-      ctx.moveTo(topStart.x, topStart.y);
-      ctx.lineTo(topCorner.x, topCorner.y);
-      ctx.lineWidth = laneWidth;
-      ctx.strokeStyle = '#6B4226';
-      ctx.stroke();
-      
-      // Horizontal part - ensure it stays within lane square
-      const topEnd = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
-      
-      ctx.beginPath();
-      ctx.moveTo(topCorner.x, topCorner.y);
-      ctx.lineTo(topEnd.x, topEnd.y);
-      ctx.lineWidth = laneWidth;
-      ctx.strokeStyle = '#6B4226';
-      ctx.stroke();
-      
-      // Draw bottom lane (L-shape)
-      // Horizontal part - ensure it stays within lane square
-      const botStart = worldToTexture(-LANE_SQUARE_SIZE/2 + baseInset, LANE_SQUARE_SIZE/2 - baseInset);
-      const botCorner = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, LANE_SQUARE_SIZE/2 - baseInset);
-      
-      ctx.beginPath();
-      ctx.moveTo(botStart.x, botStart.y);
-      ctx.lineTo(botCorner.x, botCorner.y);
-      ctx.lineWidth = laneWidth;
-      ctx.strokeStyle = '#6B4226';
-      ctx.stroke();
-      
-      // Vertical part - ensure it stays within lane square
-      const botEnd = worldToTexture(LANE_SQUARE_SIZE/2 - baseInset, -LANE_SQUARE_SIZE/2 + baseInset);
-      
-      ctx.beginPath();
-      ctx.moveTo(botCorner.x, botCorner.y);
-      ctx.lineTo(botEnd.x, botEnd.y);
-      ctx.lineWidth = laneWidth;
-      ctx.strokeStyle = '#6B4226';
-      ctx.stroke();
-      
-      // Draw the lane square outline for reference
-      ctx.strokeStyle = '#aaaaaa';
-      ctx.lineWidth = 2;
-      const laneSquareStart = worldToTexture(-LANE_SQUARE_SIZE/2, -LANE_SQUARE_SIZE/2);
-      const laneSquareSizeInPixels = (LANE_SQUARE_SIZE / PLAYABLE_AREA) * textureSize;
-      ctx.strokeRect(
-        laneSquareStart.x,
-        laneSquareStart.y,
-        laneSquareSizeInPixels,
-        laneSquareSizeInPixels
-      );
-      
-      // Create texture from canvas
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.wrapS = THREE.ClampToEdgeWrapping;
-      texture.wrapT = THREE.ClampToEdgeWrapping;
-      texture.minFilter = THREE.LinearFilter;
-      
-      return texture;
-    };
-    
-    // Create ground plane with lane texture
-    const groundTexture = createGroundTexture();
-    const groundGeometry = new THREE.PlaneGeometry(PLAYABLE_AREA * 2, PLAYABLE_AREA * 2);
+    // Create ground plane with simple color
+    const groundGeometry = new THREE.PlaneGeometry(GAME_MAP_SIZE, GAME_MAP_SIZE);
     const groundMaterial = new THREE.MeshStandardMaterial({ 
-      map: groundTexture,
+      color: 0x1a472a,
       roughness: 0.8,
       metalness: 0.0
     });
-    
-    // Check if texture creation failed
-    if (!groundTexture) {
-      console.error("Failed to create ground texture");
-      // Fallback to a colored material
-      groundMaterial.color = new THREE.Color(0x1a472a);
-    } else {
-      console.log("Ground texture created successfully");
-    }
     
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
@@ -435,27 +317,6 @@ const BaseScene = () => {
         x: LANE_SQUARE_SIZE/2 - baseInset, 
         y: -LANE_SQUARE_SIZE/2 + baseInset // Top right in 2D coordinates
       }
-    });
-    
-    // Add towers along lanes
-    const towerPositions = [
-      // Mid lane towers
-      { pos: new THREE.Vector3(-LANE_SQUARE_SIZE/4, 0, LANE_SQUARE_SIZE/4), enemy: false },
-      { pos: new THREE.Vector3(0, 0, 0), enemy: false },
-      { pos: new THREE.Vector3(LANE_SQUARE_SIZE/4, 0, -LANE_SQUARE_SIZE/4), enemy: true },
-      // Top lane towers
-      { pos: new THREE.Vector3(-LANE_SQUARE_SIZE/3, 0, 0), enemy: false },
-      { pos: new THREE.Vector3(-LANE_SQUARE_SIZE/3, 0, -LANE_SQUARE_SIZE/3), enemy: false },
-      { pos: new THREE.Vector3(0, 0, -LANE_SQUARE_SIZE/3), enemy: true },
-      // Bottom lane towers
-      { pos: new THREE.Vector3(0, 0, LANE_SQUARE_SIZE/3), enemy: false },
-      { pos: new THREE.Vector3(LANE_SQUARE_SIZE/3, 0, LANE_SQUARE_SIZE/3), enemy: false },
-      { pos: new THREE.Vector3(LANE_SQUARE_SIZE/3, 0, 0), enemy: true },
-    ];
-    
-    towerPositions.forEach(({ pos, enemy }) => {
-      const tower = createTower(pos, enemy);
-      mapStructure.add(tower);
     });
     
     scene.add(mapStructure);
@@ -497,45 +358,23 @@ const BaseScene = () => {
     const laneSquareLines = new THREE.LineSegments(laneSquareGeometry, laneSquareMaterial);
     laneSquareLines.position.y = 0.15; // Slightly above ground but below the boundary
     scene.add(laneSquareLines);
-    
-    // Add trees around the border to create a natural boundary
-    const borderTrees = new THREE.Group();
-    
-    // Function to check if a position is in the border area
-    const isInBorderArea = (x: number, z: number) => {
-      const absX = Math.abs(x);
-      const absZ = Math.abs(z);
-      const laneHalf = LANE_SQUARE_SIZE / 2;
-      const playableHalf = PLAYABLE_AREA / 2;
+
+    // Add cross lines across the map
+    const crossLinesGeometry = new THREE.BufferGeometry();
+    const crossVertices = new Float32Array([
+      // First diagonal line (top-left to bottom-right)
+      -GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2,  // Start at top-left
+      GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2,    // End at bottom-right
       
-      // Check if the position is outside the lane square but inside the playable area
-      return (absX > laneHalf - 5 && absX < playableHalf) || 
-             (absZ > laneHalf - 5 && absZ < playableHalf);
-    };
-    
-    // Create shared geometries for instancing
-    const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 2, 6);
-    const leavesGeometry = new THREE.ConeGeometry(1.5, 3, 6);
-    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-    const leavesMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x2E8B57,
-      roughness: 0.8
-    });
-    
-    // Add less dense trees around the border (increased spacing, reduced probability)
-    for (let i = -PLAYABLE_AREA/2; i <= PLAYABLE_AREA/2; i += 8) { // Increased spacing from 5 to 8
-      for (let j = -PLAYABLE_AREA/2; j <= PLAYABLE_AREA/2; j += 8) { // Increased spacing from 5 to 8
-        if (isInBorderArea(i, j) && Math.random() < 0.5) { // Reduced chance from 0.7 to 0.5
-          const treePosition = new THREE.Vector3(i, 0, j);
-          const treeScale = 0.8 + Math.random() * 0.4;
-          const tree = createTree(treePosition);
-          tree.scale.set(treeScale, treeScale, treeScale);
-          borderTrees.add(tree);
-        }
-      }
-    }
-    
-    scene.add(borderTrees);
+      // Second diagonal line (top-right to bottom-left)
+      GAME_MAP_SIZE/2, 0, -GAME_MAP_SIZE/2,   // Start at top-right
+      -GAME_MAP_SIZE/2, 0, GAME_MAP_SIZE/2    // End at bottom-left
+    ]);
+    crossLinesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(crossVertices, 3));
+    const crossLinesMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    const crossLines = new THREE.LineSegments(crossLinesGeometry, crossLinesMaterial);
+    crossLines.position.y = 0.25; // Slightly above other lines to be visible
+    scene.add(crossLines);
 
     // Mouse movement and pointer lock
     let euler = new THREE.Euler(0, 0, 0, 'YXZ');
