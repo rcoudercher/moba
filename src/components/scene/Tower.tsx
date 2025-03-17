@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createHealthBar } from '../../utils';
 import { GameObjectWithHealth } from '../../types/gameObjects';
 import positionRegistry, { TeamType } from '../../utils/PositionRegistry';
+import gameEvents, { ProjectileImpactEvent } from '../../utils/EventSystem';
 
 // Tower interface
 export interface Tower extends THREE.Group, GameObjectWithHealth {
@@ -235,7 +236,7 @@ export const createTower = (
       (rangeIndicator.material as THREE.LineDashedMaterial).color.set(0xff0000);
       
       // Log detection
-      console.log('Tower detected enemies:', enemiesInRange);
+      // console.log('Tower detected enemies:', enemiesInRange);
       
       // Check if tower can shoot (not on cooldown)
       if (tower.attackCooldown <= 0) {
@@ -246,7 +247,7 @@ export const createTower = (
         tower.shootAt(targetData.position.clone());
         
         // Set cooldown
-        tower.attackCooldown = 2; // 2 seconds cooldown
+        tower.attackCooldown = 3; // 3 seconds cooldown (was 2)
       } else {
         // Reduce cooldown
         tower.attackCooldown -= 0.5; // 0.5 seconds per check (assuming 500ms interval)
@@ -313,6 +314,9 @@ export const createTower = (
     // Calculate time to reach target
     const timeToTarget = distance / speed;
     
+    // Projectile damage
+    const projectileDamage = 12; // Reduced from 20 to 12
+    
     // Animation variables
     let elapsedTime = 0;
     const animateProjectile = () => {
@@ -363,6 +367,18 @@ export const createTower = (
         });
         const outerImpact = new THREE.Mesh(outerImpactGeometry, outerImpactMaterial);
         impact.add(outerImpact);
+        
+        // Dispatch projectile impact event
+        const impactEvent: ProjectileImpactEvent = {
+          type: 'projectile_impact',
+          timestamp: Date.now(),
+          position: targetPosition.clone(),
+          radius: 2.0, // Reduced from 2.5 to match visual effect better
+          damage: projectileDamage,
+          sourceTeam: team,
+          sourceId: 'tower' // Could use a unique ID if needed
+        };
+        gameEvents.dispatchEvent(impactEvent);
         
         // Animate impact and remove
         let impactScale = 1;

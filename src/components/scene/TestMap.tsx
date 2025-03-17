@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createTower, Tower } from './Tower';
-import Player, { PlayerProps } from './Player';
+import Player, { PlayerProps, PlayerRef } from './Player';
 import positionRegistry from '../../utils/PositionRegistry';
+import { useLogStore, globalLogger } from '../../utils/LogStore';
+import LogDisplay from '../ui/LogDisplay';
 
 const TestMap: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -16,6 +18,19 @@ const TestMap: React.FC = () => {
   const [towerRange, setTowerRange] = useState<number>(15);
   const towerRef = useRef<Tower | null>(null);
   const playerIdRef = useRef<string>('player1');
+  const [showDamageFlash, setShowDamageFlash] = useState<boolean>(false);
+  const lastHealthRef = useRef<number>(100);
+  
+  // Get addLog function from LogStore
+  const { addLog } = useLogStore();
+  
+  // Set up global logger
+  useEffect(() => {
+    globalLogger.setAddLogFunction(addLog);
+    return () => {
+      globalLogger.setAddLogFunction(() => {});
+    };
+  }, [addLog]);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -158,22 +173,31 @@ const TestMap: React.FC = () => {
 
   // Register player in position registry when team changes
   useEffect(() => {
-    // Register player in position registry
-    positionRegistry.register(playerIdRef.current, {
-      position: new THREE.Vector3(0, 0, 30), // Initial position
-      team: playerTeam,
-      type: 'player',
-      health: 100,
-      maxHealth: 100,
-      isAlive: true
-    });
+    // Only register if not already registered
+    const existingPlayer = positionRegistry.getEntity(playerIdRef.current);
     
-    // Debug: log all entities in registry
-    positionRegistry.debugLog();
+    if (!existingPlayer) {
+      // Register player in position registry
+      positionRegistry.register(playerIdRef.current, {
+        position: new THREE.Vector3(0, 0, 30), // Initial position
+        team: playerTeam,
+        type: 'player',
+        health: 100,
+        maxHealth: 100,
+        isAlive: true
+      });
+    } else {
+      // Just update the team
+      positionRegistry.updateMetadata(playerIdRef.current, {
+        team: playerTeam
+      });
+    }
     
     return () => {
-      // Remove player from registry when component unmounts or team changes
-      positionRegistry.remove(playerIdRef.current);
+      // Only remove player from registry when component unmounts, not when team changes
+      if (!playerTeam) {
+        positionRegistry.remove(playerIdRef.current);
+      }
     };
   }, [playerTeam]);
 
@@ -254,6 +278,23 @@ const TestMap: React.FC = () => {
         </div>
       </div>
 
+      {/* Log Display Component */}
+      <LogDisplay position="left" />
+
+      {/* Damage flash overlay */}
+      {showDamageFlash && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(255, 0, 0, 0.3)',
+          pointerEvents: 'none',
+          zIndex: 1000,
+        }} />
+      )}
+
       {sceneReady && sceneRef.current && cameraRef.current && (
         <>
           {/* Player */}
@@ -264,11 +305,8 @@ const TestMap: React.FC = () => {
             playableArea={100}
             team={playerTeam}
             onPositionChange={(position) => {
-              console.log('Player moved to:', position);
               // Update player position in registry
               positionRegistry.updatePosition(playerIdRef.current, position);
-              
-              // Tower detection is now handled by the tower itself
             }}
             onHealthChange={(health, maxHealth) => {
               console.log('Player health:', health, '/', maxHealth);
@@ -277,45 +315,30 @@ const TestMap: React.FC = () => {
                 health,
                 maxHealth
               });
+              
+              // Show damage flash effect if health decreased
+              if (health < lastHealthRef.current) {
+                setShowDamageFlash(true);
+                setTimeout(() => setShowDamageFlash(false), 200);
+              }
+              
+              // Update last health reference
+              lastHealthRef.current = health;
             }}
             onDeath={() => {
               console.log('Player died');
+              addLog('Player died! Game over.', 'error');
               // Update player alive status in registry
               positionRegistry.updateMetadata(playerIdRef.current, {
                 isAlive: false
               });
+              
+              // Show game over message
+              alert('Game Over! You were defeated by the enemy tower.');
             }}
           />
         </>
       )}
-      
-      {/* Debug UI for position registry */}
-      <div style={{
-        position: 'absolute',
-        bottom: '20px',
-        left: '20px',
-        zIndex: 100,
-        background: 'rgba(0, 0, 0, 0.5)',
-        padding: '10px',
-        borderRadius: '5px',
-        color: 'white',
-        maxWidth: '300px',
-        fontSize: '12px'
-      }}>
-        <button 
-          onClick={() => positionRegistry.debugLog()}
-          style={{
-            padding: '5px 10px',
-            background: '#444',
-            color: 'white',
-            border: 'none',
-            borderRadius: '3px',
-            cursor: 'pointer'
-          }}
-        >
-          Log Registry
-        </button>
-      </div>
     </div>
   );
 };

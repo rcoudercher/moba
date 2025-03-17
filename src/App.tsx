@@ -3,6 +3,7 @@ import BaseScene from './components/scene/BaseScene';
 import TestMap from './components/scene/TestMap';
 import MainMenu, { MapType } from './components/MainMenu';
 import GameUI from './components/GameUI';
+import { LogProvider } from './utils/LogStore';
 import './App.css';
 
 const App: React.FC = () => {
@@ -30,16 +31,18 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="app">
-      {isGameStarted ? (
-        <>
-          {renderMap()}
-          <GameUI onReturnToMenu={handleReturnToMenu} />
-        </>
-      ) : (
-        <MainMenu onStartGame={handleStartGame} />
-      )}
-    </div>
+    <LogProvider>
+      <div className="app">
+        {isGameStarted ? (
+          <>
+            {renderMap()}
+            <GameUI onReturnToMenu={handleReturnToMenu} />
+          </>
+        ) : (
+          <MainMenu onStartGame={handleStartGame} />
+        )}
+      </div>
+    </LogProvider>
   );
 };
 
