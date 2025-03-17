@@ -13,7 +13,6 @@ export interface PlayerProps {
   onPositionChange?: (position: THREE.Vector3) => void;
   onHealthChange?: (health: number, maxHealth: number) => void;
   onDeath?: () => void;
-  onMount?: () => void;
   obstacles?: THREE.Object3D[];
 }
 
@@ -43,6 +42,11 @@ const Player: React.FC<PlayerProps> = ({
 
   // Get log functions from LogStore
   const { addLog } = useLogStore();
+
+  useEffect(() => {
+    console.log('Player mounted');
+    addLog('Player mounted', 'info');
+  }, []);
   
   // Effect to handle player setup
   useEffect(() => {

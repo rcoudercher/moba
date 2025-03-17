@@ -279,7 +279,7 @@ const TestMap: React.FC = () => {
       </div>
 
       {/* Log Display Component */}
-      <LogDisplay position="left" />
+      <LogDisplay position="bottom-left" />
 
       {/* Damage flash overlay */}
       {showDamageFlash && (

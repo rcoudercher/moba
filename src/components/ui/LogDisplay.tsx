@@ -51,6 +51,9 @@ const LogDisplay: React.FC<LogDisplayProps> = ({
     }
   };
 
+  // Determine if logs should display in reverse order (for bottom positions)
+  const isBottomPosition = position.startsWith('bottom');
+
   return (
     <div style={{
       position: 'absolute',
@@ -62,7 +65,9 @@ const LogDisplay: React.FC<LogDisplayProps> = ({
       color: 'white',
       width,
       maxHeight,
-      overflowY: 'auto'
+      overflowY: 'auto',
+      display: 'flex',
+      flexDirection: 'column'
     }}>
       <div style={{ 
         display: 'flex', 
@@ -70,7 +75,8 @@ const LogDisplay: React.FC<LogDisplayProps> = ({
         alignItems: 'center',
         margin: '0 0 10px 0', 
         borderBottom: '1px solid #555', 
-        paddingBottom: '5px' 
+        paddingBottom: '5px',
+        order: isBottomPosition ? '1' : '0'
       }}>
         <h3 style={{ margin: 0 }}>{title}</h3>
         <button 
@@ -89,27 +95,37 @@ const LogDisplay: React.FC<LogDisplayProps> = ({
         </button>
       </div>
       
-      {logs.length === 0 ? (
-        <div style={{ color: '#888', fontStyle: 'italic' }}>No logs yet...</div>
-      ) : (
-        <div>
-          {logs.map((log, index) => (
-            <div key={index} style={{ 
-              marginBottom: '5px', 
-              padding: '5px', 
-              borderBottom: '1px solid #333',
-              fontSize: '12px',
-              borderLeft: `3px solid ${getLogTypeColor(log.type)}`,
-              paddingLeft: '8px'
-            }}>
-              <div style={{ color: '#aaa', fontSize: '10px' }}>
-                {log.timestamp.toLocaleTimeString()}
+      <div style={{ 
+        order: isBottomPosition ? '0' : '1',
+        display: 'flex',
+        flexDirection: 'column',
+        flexGrow: 1
+      }}>
+        {logs.length === 0 ? (
+          <div style={{ color: '#888', fontStyle: 'italic' }}>No logs yet...</div>
+        ) : (
+          <div style={{ 
+            display: 'flex',
+            flexDirection: isBottomPosition ? 'column-reverse' : 'column'
+          }}>
+            {logs.map((log, index) => (
+              <div key={index} style={{ 
+                marginBottom: '5px', 
+                padding: '5px', 
+                borderBottom: '1px solid #333',
+                fontSize: '12px',
+                borderLeft: `3px solid ${getLogTypeColor(log.type)}`,
+                paddingLeft: '8px'
+              }}>
+                <div style={{ color: '#aaa', fontSize: '10px' }}>
+                  {log.timestamp.toLocaleTimeString()}
+                </div>
+                <div>{log.message}</div>
               </div>
-              <div>{log.message}</div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
