@@ -11,6 +11,7 @@ export interface Tower extends THREE.Group, GameObjectWithHealth {
   detectEnemies: () => void;
   startDetection: () => void;
   stopDetection: () => void;
+  shootAt: (targetPosition: THREE.Vector3) => void;
 }
 
 /**
@@ -236,11 +237,155 @@ export const createTower = (
       // Log detection
       console.log('Tower detected enemies:', enemiesInRange);
       
-      // TODO: Attack logic would go here
+      // Check if tower can shoot (not on cooldown)
+      if (tower.attackCooldown <= 0) {
+        // Get the first enemy (highest priority)
+        const [targetId, targetData] = enemiesInRange[0];
+        
+        // Shoot at the enemy
+        tower.shootAt(targetData.position.clone());
+        
+        // Set cooldown
+        tower.attackCooldown = 2; // 2 seconds cooldown
+      } else {
+        // Reduce cooldown
+        tower.attackCooldown -= 0.5; // 0.5 seconds per check (assuming 500ms interval)
+      }
     } else {
       // Change back to yellow when no enemies
       (rangeIndicator.material as THREE.LineDashedMaterial).color.set(0xffff00);
+      
+      // Reduce cooldown even when no enemies
+      if (tower.attackCooldown > 0) {
+        tower.attackCooldown -= 0.5;
+      }
     }
+  };
+  
+  // Shoot projectile at target position
+  tower.shootAt = (targetPosition: THREE.Vector3) => {
+    // Create projectile
+    const projectileGeometry = new THREE.SphereGeometry(0.5, 24, 24);
+    const projectileMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 2,
+      transparent: true,
+      opacity: 0.9
+    });
+    const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+    
+    // Set initial position (from tower top)
+    const startPosition = tower.position.clone();
+    startPosition.y = 6.5; // Top of the tower
+    projectile.position.copy(startPosition);
+    
+    // Add to scene
+    tower.parent?.add(projectile);
+    
+    // Calculate direction and distance
+    const direction = new THREE.Vector3().subVectors(targetPosition, startPosition).normalize();
+    const distance = startPosition.distanceTo(targetPosition);
+    
+    // Add outer glow effect
+    const glowGeometry = new THREE.SphereGeometry(0.8, 24, 24);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: team === 'red' ? 0xff8888 : 0x8888ff,
+      transparent: true,
+      opacity: 0.3
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    projectile.add(glow);
+    
+    // Add inner core glow
+    const coreGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+    const coreMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    projectile.add(core);
+    
+    // Projectile speed (units per second)
+    const speed = 12; // Slightly slower to make it more visible
+    
+    // Calculate time to reach target
+    const timeToTarget = distance / speed;
+    
+    // Animation variables
+    let elapsedTime = 0;
+    const animateProjectile = () => {
+      // Time increment (assuming 60fps)
+      const deltaTime = 1/60;
+      elapsedTime += deltaTime;
+      
+      // Calculate progress (0 to 1)
+      const progress = Math.min(elapsedTime / timeToTarget, 1);
+      
+      // Move projectile along path
+      const newPosition = new THREE.Vector3().lerpVectors(
+        startPosition,
+        targetPosition,
+        progress
+      );
+      projectile.position.copy(newPosition);
+      
+      // Pulse glow effect
+      const pulseScale = 1 + 0.3 * Math.sin(elapsedTime * 12);
+      glow.scale.set(pulseScale, pulseScale, pulseScale);
+      
+      // Rotate projectile for more dynamic effect
+      projectile.rotation.x += 0.05;
+      projectile.rotation.y += 0.05;
+      
+      // Continue animation until target reached
+      if (progress < 1) {
+        requestAnimationFrame(animateProjectile);
+      } else {
+        // Create impact effect
+        const impactGeometry = new THREE.SphereGeometry(1.5, 24, 24);
+        const impactMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.8
+        });
+        const impact = new THREE.Mesh(impactGeometry, impactMaterial);
+        impact.position.copy(targetPosition);
+        tower.parent?.add(impact);
+        
+        // Add colored outer impact based on team
+        const outerImpactGeometry = new THREE.SphereGeometry(2, 24, 24);
+        const outerImpactMaterial = new THREE.MeshBasicMaterial({
+          color: team === 'red' ? 0xff5555 : 0x5555ff,
+          transparent: true,
+          opacity: 0.4
+        });
+        const outerImpact = new THREE.Mesh(outerImpactGeometry, outerImpactMaterial);
+        impact.add(outerImpact);
+        
+        // Animate impact and remove
+        let impactScale = 1;
+        const animateImpact = () => {
+          impactScale *= 0.9;
+          impact.scale.set(impactScale, impactScale, impactScale);
+          impact.material.opacity *= 0.9;
+          
+          if (impactScale > 0.1) {
+            requestAnimationFrame(animateImpact);
+          } else {
+            tower.parent?.remove(impact);
+          }
+        };
+        animateImpact();
+        
+        // Remove projectile
+        tower.parent?.remove(projectile);
+      }
+    };
+    
+    // Start animation
+    animateProjectile();
   };
   
   // Start detection interval
