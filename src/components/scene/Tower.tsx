@@ -1,14 +1,6 @@
 import * as THREE from 'three';
-
-// Interface for objects with health
-export interface GameObjectWithHealth extends THREE.Object3D {
-  health: number;
-  maxHealth: number;
-  isDestroyed: boolean;
-  healthBar?: THREE.Group;
-  takeDamage: (amount: number) => void;
-  updateHealthBar: () => void;
-}
+import { createHealthBar } from '../../utils';
+import { GameObjectWithHealth } from '../../types/gameObjects';
 
 // Tower interface
 export interface Tower extends THREE.Group, GameObjectWithHealth {
@@ -16,54 +8,6 @@ export interface Tower extends THREE.Group, GameObjectWithHealth {
   shootingRange: number;
   attackCooldown: number;
 }
-
-// Function to create a health bar using sprites
-const createHealthBar = (width: number, height: number, position: THREE.Vector3, yOffset: number): THREE.Group => {
-  const group = new THREE.Group();
-  
-  // Create a canvas for the health bar
-  const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 8;
-  const context = canvas.getContext('2d');
-  if (!context) return group;
-  
-  // Draw background (gray)
-  context.fillStyle = '#444444';
-  context.fillRect(0, 0, 64, 8);
-  
-  // Draw health (green)
-  context.fillStyle = '#00ff00';
-  context.fillRect(0, 0, 64, 8);
-  
-  // Create sprite texture
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  
-  // Create sprite material
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true
-  });
-  
-  // Create sprite
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(width, height, 1);
-  
-  // Position the sprite
-  sprite.position.y = yOffset;
-  
-  // Add to group
-  group.add(sprite);
-  
-  // Store reference to the canvas and context for updates
-  group.userData.canvas = canvas;
-  group.userData.context = context;
-  group.userData.texture = texture;
-  group.userData.sprite = sprite;
-  
-  return group;
-};
 
 /**
  * Creates a tower with health, team affiliation, and shooting range

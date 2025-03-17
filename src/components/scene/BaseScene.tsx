@@ -1,370 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { KeyBinding, defaultKeyBindings } from '../../config/keyBindings';
 import Minimap from './Minimap';
-import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
-import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import Player from './Player';
 
 // Import environment components
 import { createSky } from './environment/Sky';
-import createTower, { Tower, GameObjectWithHealth } from './Tower';
-
-// Define interface for minions
-interface Minion extends THREE.Group, GameObjectWithHealth {
-  health: number;
-  maxHealth: number;
-  team: 'ally' | 'enemy';
-  speed: number;
-  targetPosition: THREE.Vector3;
-  isDestroyed: boolean;
-  update: () => void;
-  attackTarget: THREE.Object3D | null;
-  attackCooldown: number;
-  attackRange: number;
-  damage: number;
-  targetMonument: () => void;
-}
-
-// Function to create a simple tree
-const createTree = (position: THREE.Vector3): THREE.Group => {
-  const tree = new THREE.Group();
-  
-  // Tree trunk (brown cylinder)
-  const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 2, 6);
-  const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-  const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-  trunk.castShadow = true;
-  trunk.position.y = 1;
-  tree.add(trunk);
-  
-  // Tree leaves (green cone)
-  const leavesGeometry = new THREE.ConeGeometry(1.5, 3, 6);
-  const leavesMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x2E8B57,
-    roughness: 0.8
-  });
-  const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
-  leaves.castShadow = true;
-  leaves.position.y = 3.5;
-  tree.add(leaves);
-  
-  tree.position.copy(position);
-  return tree;
-};
-
-// Function to create a simple bush
-const createBush = (position: THREE.Vector3): THREE.Mesh => {
-  const bushGeometry = new THREE.SphereGeometry(0.5, 8, 6);
-  const bushMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x3B7A57,
-    roughness: 0.8
-  });
-  const bush = new THREE.Mesh(bushGeometry, bushMaterial);
-  bush.castShadow = true;
-  bush.position.copy(position);
-  bush.position.y = 0.5;
-  return bush;
-};
-
-// Function to create a lane
-const createLane = (start: THREE.Vector3, end: THREE.Vector3, width: number): THREE.Mesh => {
-  // For straight lanes (horizontal or vertical)
-  if (start.x === end.x || start.z === end.z) {
-    const isHorizontal = start.z === end.z;
-    const length = isHorizontal 
-      ? Math.abs(end.x - start.x) 
-      : Math.abs(end.z - start.z);
-    
-    const laneGeometry = new THREE.PlaneGeometry(isHorizontal ? length : width, isHorizontal ? width : length);
-    const laneMaterial = new THREE.MeshStandardMaterial({
-      color: 0x808080,
-      roughness: 0.8,
-      metalness: 0.2
-    });
-    
-    const lane = new THREE.Mesh(laneGeometry, laneMaterial);
-    
-    // Position at the center point
-    if (isHorizontal) {
-      lane.position.set(
-        (start.x + end.x) / 2,
-        0.1, // Slightly above ground
-        start.z
-      );
-      // No rotation needed for horizontal lanes
-    } else {
-      lane.position.set(
-        start.x,
-        0.1, // Slightly above ground
-        (start.z + end.z) / 2
-      );
-      // Rotate for vertical lanes
-      lane.rotation.y = Math.PI / 2;
-    }
-    
-    lane.receiveShadow = true;
-    return lane;
-  } 
-  // For diagonal lanes
-  else {
-    // Calculate length of the lane
-    const direction = new THREE.Vector3().subVectors(end, start);
-    const length = direction.length();
-    
-    // Create lane geometry
-    const laneGeometry = new THREE.PlaneGeometry(length, width);
-    const laneMaterial = new THREE.MeshStandardMaterial({
-      color: 0x808080,
-      roughness: 0.8,
-      metalness: 0.2
-    });
-    
-    const lane = new THREE.Mesh(laneGeometry, laneMaterial);
-    
-    // Position at the midpoint
-    const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-    lane.position.copy(midpoint);
-    lane.position.y = 0.1; // Slightly above ground
-    
-    // Calculate rotation to align with direction
-    const angle = Math.atan2(direction.z, direction.x);
-    lane.rotation.y = -angle + Math.PI / 2;
-    
-    lane.receiveShadow = true;
-    return lane;
-  }
-};
-
-// Function to create a health bar using sprites
-const createHealthBar = (width: number, height: number, position: THREE.Vector3, yOffset: number): THREE.Group => {
-  const group = new THREE.Group();
-  
-  // Create a canvas for the health bar
-  const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 8;
-  const context = canvas.getContext('2d');
-  if (!context) return group;
-  
-  // Draw background (gray)
-  context.fillStyle = '#444444';
-  context.fillRect(0, 0, 64, 8);
-  
-  // Draw health (green)
-  context.fillStyle = '#00ff00';
-  context.fillRect(0, 0, 64, 8);
-  
-  // Create sprite texture
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  
-  // Create sprite material
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true
-  });
-  
-  // Create sprite
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(width, height, 1);
-  
-  // Position the sprite
-  sprite.position.y = yOffset;
-  
-  // Add to group
-  group.add(sprite);
-  
-  // Store reference to the canvas and context for updates
-  group.userData.canvas = canvas;
-  group.userData.context = context;
-  group.userData.texture = texture;
-  group.userData.sprite = sprite;
-  
-  return group;
-};
-
-const createBase = (position: THREE.Vector3, isEnemy: boolean): THREE.Group & GameObjectWithHealth => {
-  const base = new THREE.Group() as THREE.Group & GameObjectWithHealth;
-  
-  // Set health properties
-  base.health = 1000;
-  base.maxHealth = 1000;
-  base.isDestroyed = false;
-  
-  // Main structure - larger size but still low to the ground
-  const baseGeometry = new THREE.CylinderGeometry(18, 22, 3, 8);
-  const baseMaterial = new THREE.MeshStandardMaterial({ 
-    color: isEnemy ? 0xff0000 : 0x0000ff,
-    roughness: 0.7
-  });
-  const baseStructure = new THREE.Mesh(baseGeometry, baseMaterial);
-  baseStructure.position.copy(position);
-  baseStructure.position.y = 1.5; // Low to the ground
-  baseStructure.castShadow = true;
-  baseStructure.receiveShadow = true;
-  
-  base.add(baseStructure);
-  
-  // Add platform on top - thinner
-  const platformGeometry = new THREE.CylinderGeometry(15, 15, 0.5, 8);
-  const platformMaterial = new THREE.MeshStandardMaterial({
-    color: isEnemy ? 0xff5555 : 0x5555ff,
-    roughness: 0.5
-  });
-  const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-  platform.position.copy(position);
-  platform.position.y = 3.25; // Top of the base
-  platform.castShadow = true;
-  platform.receiveShadow = true;
-  base.add(platform);
-  
-  // Add central objective structure (the main target to destroy)
-  const objectiveGeometry = new THREE.CylinderGeometry(3, 3, 8, 8);
-  const objectiveMaterial = new THREE.MeshStandardMaterial({
-    color: isEnemy ? 0xff0000 : 0x0000ff,
-    emissive: isEnemy ? 0x330000 : 0x000033,
-    roughness: 0.3,
-    metalness: 0.7
-  });
-  const objective = new THREE.Mesh(objectiveGeometry, objectiveMaterial);
-  objective.position.copy(position);
-  objective.position.y = 7; // Tall structure rising from the platform
-  objective.castShadow = true;
-  objective.receiveShadow = true;
-  
-  // Store the objective in userData for collision detection
-  base.userData.objective = objective;
-  base.userData.objectiveRadius = 3; // Radius of the objective cylinder
-  
-  // Add glowing crystal on top of the objective
-  const crystalGeometry = new THREE.OctahedronGeometry(1.5, 1);
-  const crystalMaterial = new THREE.MeshStandardMaterial({
-    color: isEnemy ? 0xff3333 : 0x3333ff,
-    emissive: isEnemy ? 0xff0000 : 0x0000ff,
-    emissiveIntensity: 0.5,
-    roughness: 0.2,
-    metalness: 0.8
-  });
-  const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
-  crystal.position.copy(position);
-  crystal.position.y = 12; // On top of the objective
-  crystal.castShadow = true;
-  crystal.rotation.y = Math.PI / 4; // Rotate for better appearance
-  
-  // Add a point light inside the crystal for glow effect
-  const crystalLight = new THREE.PointLight(isEnemy ? 0xff0000 : 0x0000ff, 1, 20);
-  crystalLight.position.copy(position);
-  crystalLight.position.y = 12;
-  
-  base.add(objective);
-  base.add(crystal);
-  base.add(crystalLight);
-  
-  // Create and add health bar
-  const healthBarWidth = 10;
-  const healthBarHeight = 1;
-  const healthBarYOffset = 15; // Position above the crystal
-  base.healthBar = createHealthBar(healthBarWidth, healthBarHeight, position, healthBarYOffset);
-  base.add(base.healthBar);
-  
-  // Add methods for health management
-  base.takeDamage = (amount: number) => {
-    if (base.isDestroyed) return;
-    
-    base.health -= amount;
-    if (base.health <= 0) {
-      base.health = 0;
-      base.isDestroyed = true;
-      
-      // Handle destruction
-      crystal.visible = false;
-      crystalLight.visible = false;
-      
-      // Create explosion effect
-      const explosionGeometry = new THREE.SphereGeometry(5, 32, 32);
-      const explosionMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 0.8
-      });
-      const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
-      explosion.position.copy(position);
-      explosion.position.y = 7;
-      base.add(explosion);
-      
-      // Animate explosion and fade out
-      let scale = 1;
-      const expandExplosion = () => {
-        if (scale < 3) {
-          scale += 0.1;
-          explosion.scale.set(scale, scale, scale);
-          explosion.material.opacity -= 0.02;
-          requestAnimationFrame(expandExplosion);
-        } else {
-          base.remove(explosion);
-        }
-      };
-      expandExplosion();
-      
-      // Make objective look damaged
-      objective.material.color.set(0x555555);
-      objective.material.emissive.set(0x000000);
-      objective.scale.y = 0.5; // Collapse it a bit
-      objective.position.y = 5; // Lower it
-    }
-    
-    base.updateHealthBar();
-  };
-  
-  base.updateHealthBar = () => {
-    if (!base.healthBar) return;
-    
-    const healthPercent = base.health / base.maxHealth;
-    
-    // Get canvas context
-    const context = base.healthBar.userData.context as CanvasRenderingContext2D;
-    const canvas = base.healthBar.userData.canvas as HTMLCanvasElement;
-    const texture = base.healthBar.userData.texture as THREE.CanvasTexture;
-    
-    if (!context || !canvas || !texture) return;
-    
-    // Clear canvas
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw background (gray)
-    context.fillStyle = '#444444';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw health with color based on percentage
-    if (healthPercent > 0.6) {
-      context.fillStyle = '#00ff00'; // Green
-    } else if (healthPercent > 0.3) {
-      context.fillStyle = '#ffff00'; // Yellow
-    } else {
-      context.fillStyle = '#ff0000'; // Red
-    }
-    
-    const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
-    context.fillRect(0, 0, healthWidth, canvas.height);
-    
-    // Update texture
-    texture.needsUpdate = true;
-    
-    // Make health bar always face camera
-    const sprite = base.healthBar.userData.sprite as THREE.Sprite;
-    if (sprite) {
-      sprite.center.set(0.5, 0);
-    }
-  };
-  
-  // Initialize health bar
-  base.updateHealthBar();
-  
-  return base;
-};
+import createTower, { Tower } from './Tower';
+import { createBase, createHealthBar } from '../../utils';
+import { MinionSpawner, MinionType } from './mobile';
+import { GameObjectWithHealth } from '../../types/gameObjects';
 
 const BaseScene = () => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.Camera | null>(null);
   const [isControlsEnabled, setIsControlsEnabled] = useState(true);
   const [fps, setFps] = useState<number>(0);
   const [playerPos, setPlayerPos] = useState({ x: 0, z: 0 });
@@ -372,18 +21,14 @@ const BaseScene = () => {
     ally: { x: 0, y: 0 },
     enemy: { x: 0, y: 0 }
   });
-  const [keyBindings, setKeyBindings] = useState<KeyBinding[]>(() => {
-    const savedBindings = localStorage.getItem('keyBindings');
-    return savedBindings ? JSON.parse(savedBindings) : defaultKeyBindings;
-  });
+
   const [gameState, setGameState] = useState({
     allyBaseHealth: 1000,
     enemyBaseHealth: 1000,
     gameOver: false,
     winner: null as 'ally' | 'enemy' | null
   });
-  const [minions, setMinions] = useState<Minion[]>([]);
-  const [nextSpawnTime, setNextSpawnTime] = useState<number>(30);
+  const [minions, setMinions] = useState<MinionType[]>([]);
   
   // Add player health state
   const [playerHealth, setPlayerHealth] = useState({
@@ -411,16 +56,6 @@ const BaseScene = () => {
     enemyTower1?: Tower,
     enemyTower2?: Tower
   }>({});
-  
-  // Reference to store the character
-  const characterRef = useRef<{
-    health: number,
-    maxHealth: number,
-    model?: THREE.Mesh
-  }>({
-    health: 100,
-    maxHealth: 100
-  });
   
   // Function to reset the game
   const resetGame = useCallback(() => {
@@ -496,274 +131,13 @@ const BaseScene = () => {
   const GAME_MAP_SIZE = 200; // Total size of the game map
   const PLAYABLE_AREA = 175; // Size of the playable area
   const LANE_SQUARE_SIZE = 145; // Size of the square formed by the lanes
-  const INNER_SQUARE_SIZE = 140; // Size of the inner square (kept for reference but not used)
-  const baseInset = 10; // How much to move bases inward - moved to component level
-  
-  // Function to create a minion
-  const createMinion = (position: THREE.Vector3, team: 'ally' | 'enemy'): Minion => {
-    const minion = new THREE.Group() as Minion;
-    
-    // Set minion properties
-    minion.health = 100;
-    minion.maxHealth = 100;
-    minion.team = team;
-    minion.speed = 0.05;
-    minion.isDestroyed = false;
-    minion.attackTarget = null;
-    minion.attackCooldown = 0;
-    minion.attackRange = 5;
-    minion.damage = 20;
-    
-    // Create minion body
-    const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ 
-      color: team === 'ally' ? 0x0000ff : 0xff0000,
-      roughness: 0.7
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = 0.4;
-    body.castShadow = true;
-    minion.add(body);
-    
-    // Create minion head
-    const headGeometry = new THREE.SphereGeometry(0.2, 8, 8);
-    const headMaterial = new THREE.MeshStandardMaterial({ 
-      color: team === 'ally' ? 0x5555ff : 0xff5555,
-      roughness: 0.5
-    });
-    const head = new THREE.Mesh(headGeometry, headMaterial);
-    head.position.y = 0.9;
-    head.castShadow = true;
-    minion.add(head);
-    
-    // Create health bar
-    const healthBarWidth = 1;
-    const healthBarHeight = 0.1;
-    const healthBarYOffset = 1.5;
-    minion.healthBar = createHealthBar(healthBarWidth, healthBarHeight, new THREE.Vector3(0, 0, 0), healthBarYOffset);
-    minion.add(minion.healthBar);
-    
-    // Set minion position
-    minion.position.copy(position);
-    
-    // Set target position based on team
-    minion.targetPosition = team === 'ally' 
-      ? new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2) // Enemy base
-      : new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2); // Ally base
-    
-    // Add method to target the enemy monument
-    minion.targetMonument = () => {
-      const targetBase = minion.team === 'ally' ? basesRef.current.enemyBase : basesRef.current.allyBase;
-      if (targetBase && targetBase.userData.objective) {
-        minion.attackTarget = targetBase.userData.objective;
-      }
-    };
-    
-    // Add methods for health management
-    minion.takeDamage = (amount: number) => {
-      if (minion.isDestroyed) return;
-      
-      minion.health -= amount;
-      if (minion.health <= 0) {
-        minion.health = 0;
-        minion.isDestroyed = true;
-        
-        // Create death effect
-        const explosionGeometry = new THREE.SphereGeometry(0.5, 8, 8);
-        const explosionMaterial = new THREE.MeshBasicMaterial({
-          color: 0xffff00,
-          transparent: true,
-          opacity: 0.8
-        });
-        const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
-        explosion.position.y = 0.5;
-        minion.add(explosion);
-        
-        // Animate explosion and fade out
-        let scale = 1;
-        const expandExplosion = () => {
-          if (scale < 2) {
-            scale += 0.1;
-            explosion.scale.set(scale, scale, scale);
-            explosion.material.opacity -= 0.05;
-            requestAnimationFrame(expandExplosion);
-          } else {
-            minion.visible = false;
-            minion.removeFromParent();
-          }
-        };
-        expandExplosion();
-      }
-      
-      minion.updateHealthBar();
-    };
-    
-    minion.updateHealthBar = () => {
-      if (!minion.healthBar) return;
-      
-      const healthPercent = minion.health / minion.maxHealth;
-      
-      // Get canvas context
-      const context = minion.healthBar.userData.context as CanvasRenderingContext2D;
-      const canvas = minion.healthBar.userData.canvas as HTMLCanvasElement;
-      const texture = minion.healthBar.userData.texture as THREE.CanvasTexture;
-      
-      if (!context || !canvas || !texture) return;
-      
-      // Clear canvas
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw background (gray)
-      context.fillStyle = '#444444';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw health with color based on percentage
-      if (healthPercent > 0.6) {
-        context.fillStyle = '#00ff00'; // Green
-      } else if (healthPercent > 0.3) {
-        context.fillStyle = '#ffff00'; // Yellow
-      } else {
-        context.fillStyle = '#ff0000'; // Red
-      }
-      
-      const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
-      context.fillRect(0, 0, healthWidth, canvas.height);
-      
-      // Update texture
-      texture.needsUpdate = true;
-      
-      // Make health bar always face camera
-      const sprite = minion.healthBar.userData.sprite as THREE.Sprite;
-      if (sprite) {
-        sprite.center.set(0.5, 0);
-      }
-    };
-    
-    // Initialize health bar
-    minion.updateHealthBar();
-    
-    // Update function for minion movement and combat
-    minion.update = () => {
-      if (minion.isDestroyed) return;
-      
-      // Decrease attack cooldown if it's active
-      if (minion.attackCooldown > 0) {
-        minion.attackCooldown--;
-      }
-      
-      // If we have a target and it's destroyed, clear it
-      if (minion.attackTarget && 
-          ((minion.attackTarget as any).isDestroyed || 
-           !(minion.attackTarget as any).visible)) {
-        minion.attackTarget = null;
-      }
-      
-      // If we have a target, attack it
-      if (minion.attackTarget && minion.attackCooldown <= 0) {
-        // Face the target
-        const targetDir = new THREE.Vector3()
-          .subVectors(minion.attackTarget.position, minion.position)
-          .setY(0)
-          .normalize();
-        
-        minion.rotation.y = Math.atan2(targetDir.x, targetDir.z);
-        
-        // Attack
-        if ((minion.attackTarget as any).takeDamage) {
-          // Create projectile effect
-          const projectileGeometry = new THREE.SphereGeometry(0.1, 8, 8);
-          const projectileMaterial = new THREE.MeshBasicMaterial({
-            color: minion.team === 'ally' ? 0x00ffff : 0xff00ff,
-            transparent: true,
-            opacity: 0.8
-          });
-          const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-          projectile.position.copy(minion.position);
-          projectile.position.y += 0.8; // Start at minion's head level
-          
-          // Add to scene
-          const currentScene = minion.parent;
-          if (currentScene) {
-            currentScene.add(projectile);
-          }
-          
-          // Animate projectile
-          const startPos = projectile.position.clone();
-          const endPos = minion.attackTarget.position.clone();
-          endPos.y += 1; // Aim at upper body
-          
-          const animateProjectile = (progress: number) => {
-            if (progress >= 1) {
-              if (projectile.parent) {
-                projectile.parent.remove(projectile);
-              }
-              // Deal damage when projectile hits
-              (minion.attackTarget as any).takeDamage(minion.damage);
-              return;
-            }
-            
-            // Lerp position
-            projectile.position.lerpVectors(startPos, endPos, progress);
-            
-            // Continue animation
-            requestAnimationFrame(() => animateProjectile(progress + 0.1));
-          };
-          
-          animateProjectile(0);
-          
-          // Set cooldown
-          minion.attackCooldown = 60; // 60 frames = 1 second at 60fps
-        }
-        
-        return; // Don't move while attacking
-      }
-      
-      // Calculate direction to target
-      const direction = new THREE.Vector3()
-        .subVectors(minion.targetPosition, minion.position)
-        .setY(0)
-        .normalize();
-      
-      // Move towards target
-      minion.position.x += direction.x * minion.speed;
-      minion.position.z += direction.z * minion.speed;
-      
-      // Rotate to face direction
-      minion.rotation.y = Math.atan2(direction.x, direction.z);
-      
-      // Check if on a base and adjust height
-      const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
-      const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
-      
-      const distToAllyBase = new THREE.Vector2(minion.position.x - allyBasePos.x, minion.position.z - allyBasePos.z).length();
-      const distToEnemyBase = new THREE.Vector2(minion.position.x - enemyBasePos.x, minion.position.z - enemyBasePos.z).length();
-      
-      const baseRadius = 18;
-      const baseHeight = 3.25;
-      const transitionZone = 5;
-      
-      // Adjust height based on position
-      if (distToAllyBase < baseRadius - transitionZone) {
-        minion.position.y = baseHeight;
-      } else if (distToAllyBase < baseRadius) {
-        const transitionProgress = 1 - ((distToAllyBase - (baseRadius - transitionZone)) / transitionZone);
-        minion.position.y = baseHeight * transitionProgress;
-      } else if (distToEnemyBase < baseRadius - transitionZone) {
-        minion.position.y = baseHeight;
-      } else if (distToEnemyBase < baseRadius) {
-        const transitionProgress = 1 - ((distToEnemyBase - (baseRadius - transitionZone)) / transitionZone);
-        minion.position.y = baseHeight * transitionProgress;
-      } else {
-        minion.position.y = 0;
-      }
-    };
-    
-    return minion;
-  };
   
   useEffect(() => {
-    // Scene setup
+    if (!mountRef.current) return;
+    
+    // Create scene
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     
     // Create sky and sun
     const { sky, sun } = createSky(scene);
@@ -774,6 +148,7 @@ const BaseScene = () => {
     camera.position.copy(cameraOffset);
     camera.lookAt(new THREE.Vector3(0, 0, 0));
     camera.rotation.x = -Math.PI / 3; // Steeper angle for better map view
+    cameraRef.current = camera;
     
     // Renderer setup
     const renderer = new THREE.WebGLRenderer({ 
@@ -789,61 +164,8 @@ const BaseScene = () => {
     
     mountRef.current?.appendChild(renderer.domElement);
     
-    // Character setup
-    const character = {
-      position: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5), // Start at blue base
-      velocity: new THREE.Vector3(),
-      direction: new THREE.Vector3(),
-      speed: 0.15,
-      jumpHeight: 0.2,
-      isOnGround: true,
-      gravity: 0.01,
-      targetPosition: null as THREE.Vector3 | null,
-      health: 100,
-      maxHealth: 100,
-      model: (() => {
-        // Simple character representation
-        const geometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
-        const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.castShadow = true;
-        mesh.position.y = 1;
-        return mesh;
-      })(),
-      keys: {
-        forward: false,
-        backward: false,
-        left: false,
-        right: false,
-        jump: false,
-        sprint: false
-      }
-    };
-    
-    // Store character in ref for access in JSX
-    characterRef.current = {
-      health: character.health,
-      maxHealth: character.maxHealth,
-      model: character.model
-    };
-    
-    // Create target indicator
-    const targetIndicator = (() => {
-      const geometry = new THREE.RingGeometry(0.5, 0.7, 32);
-      const material = new THREE.MeshBasicMaterial({ 
-        color: 0xffff00,
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.rotation.x = -Math.PI / 2; // Lay flat on the ground
-      mesh.visible = false;
-      return mesh;
-    })();
-    
-    scene.add(targetIndicator);
-    scene.add(character.model);
+    // Initial player position - near ally base
+    const initialPlayerPosition = new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5);
     
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -880,46 +202,6 @@ const BaseScene = () => {
     ground.receiveShadow = true;
     scene.add(ground);
     
-    // Create lane paths with brown color
-    // Create outer square lane (between lane square and inner square)
-    const createLanePath = (outerSize: number, innerSize: number, y: number = 0.05): THREE.Mesh => {
-      // Create outer and inner shapes for the lane
-      const outerShape = new THREE.Shape();
-      outerShape.moveTo(-outerSize/2, -outerSize/2);
-      outerShape.lineTo(outerSize/2, -outerSize/2);
-      outerShape.lineTo(outerSize/2, outerSize/2);
-      outerShape.lineTo(-outerSize/2, outerSize/2);
-      outerShape.lineTo(-outerSize/2, -outerSize/2);
-      
-      const innerShape = new THREE.Path();
-      innerShape.moveTo(-innerSize/2, -innerSize/2);
-      innerShape.lineTo(innerSize/2, -innerSize/2);
-      innerShape.lineTo(innerSize/2, innerSize/2);
-      innerShape.lineTo(-innerSize/2, innerSize/2);
-      innerShape.lineTo(-innerSize/2, -innerSize/2);
-      
-      outerShape.holes.push(innerShape);
-      
-      const geometry = new THREE.ShapeGeometry(outerShape);
-      const material = new THREE.MeshStandardMaterial({ 
-        color: 0x8B4513, // Brown color for lanes
-        roughness: 0.9,
-        metalness: 0.1
-      });
-      
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = y;
-      mesh.receiveShadow = true;
-      
-      return mesh;
-    };
-    
-    // Add square lane path (between lane square and inner square)
-    // Removed the squareLanePath mesh to eliminate the brown mesh on top and bottom lanes
-    // const squareLanePath = createLanePath(LANE_SQUARE_SIZE, INNER_SQUARE_SIZE);
-    // scene.add(squareLanePath);
-    
     // Create map structure
     const mapStructure = new THREE.Group();
     
@@ -952,30 +234,32 @@ const BaseScene = () => {
     });
     
     // Create towers for both teams
-    // Calculate positions for ally towers (near ally base)
-    const allyTowerDistance = 15; // Distance from base
+    // Calculate positions for ally towers (in the middle lane)
+    const allyTowerDistance = 25; // Distance from base along the middle lane
+    const allyBaseToEnemyBase = new THREE.Vector3().subVectors(enemyBasePos, allyBasePos).normalize();
     const allyTower1Pos = new THREE.Vector3(
-      allyBasePos.x + allyTowerDistance, 
-      0, 
-      allyBasePos.z
+      allyBasePos.x + allyBaseToEnemyBase.x * allyTowerDistance,
+      0,
+      allyBasePos.z + allyBaseToEnemyBase.z * allyTowerDistance
     );
     const allyTower2Pos = new THREE.Vector3(
-      allyBasePos.x, 
-      0, 
-      allyBasePos.z - allyTowerDistance
+      allyBasePos.x + allyBaseToEnemyBase.x * (allyTowerDistance * 1.7),
+      0,
+      allyBasePos.z + allyBaseToEnemyBase.z * (allyTowerDistance * 1.7)
     );
     
-    // Calculate positions for enemy towers (near enemy base)
-    const enemyTowerDistance = 15; // Distance from base
+    // Calculate positions for enemy towers (in the middle lane)
+    const enemyTowerDistance = 25; // Distance from base along the middle lane
+    const enemyBaseToAllyBase = new THREE.Vector3().subVectors(allyBasePos, enemyBasePos).normalize();
     const enemyTower1Pos = new THREE.Vector3(
-      enemyBasePos.x - enemyTowerDistance, 
-      0, 
-      enemyBasePos.z
+      enemyBasePos.x + enemyBaseToAllyBase.x * enemyTowerDistance,
+      0,
+      enemyBasePos.z + enemyBaseToAllyBase.z * enemyTowerDistance
     );
     const enemyTower2Pos = new THREE.Vector3(
-      enemyBasePos.x, 
-      0, 
-      enemyBasePos.z + enemyTowerDistance
+      enemyBasePos.x + enemyBaseToAllyBase.x * (enemyTowerDistance * 1.7),
+      0,
+      enemyBasePos.z + enemyBaseToAllyBase.z * (enemyTowerDistance * 1.7)
     );
     
     // Create the towers
@@ -994,189 +278,6 @@ const BaseScene = () => {
       enemyTower1,
       enemyTower2
     };
-    
-    // Define lane paths for minion spawning
-    const lanes = [
-      {
-        name: 'top',
-        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, -LANE_SQUARE_SIZE/2 + 5),
-        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, -LANE_SQUARE_SIZE/2 + 5)
-      },
-      {
-        name: 'mid',
-        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5),
-        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, -LANE_SQUARE_SIZE/2 + 5)
-      },
-      {
-        name: 'bottom',
-        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5),
-        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 5, 0, LANE_SQUARE_SIZE/2 - 5)
-      }
-    ];
-    
-    // Store all minions
-    const minionsList: Minion[] = [];
-    
-    // Function to spawn a wave of minions
-    const spawnMinionWave = () => {
-      // Reset the next spawn timer
-      setNextSpawnTime(30);
-      
-      // Spawn minions for each lane
-      lanes.forEach(lane => {
-        // Spawn 4 ally minions per lane
-        for (let i = 0; i < 4; i++) {
-          // Add some random offset to prevent minions from stacking
-          const offsetX = (Math.random() - 0.5) * 2;
-          const offsetZ = (Math.random() - 0.5) * 2;
-          const spawnPos = new THREE.Vector3(
-            lane.allySpawn.x + offsetX,
-            0,
-            lane.allySpawn.z + offsetZ
-          );
-          
-          const minion = createMinion(spawnPos, 'ally');
-          scene.add(minion);
-          minionsList.push(minion);
-        }
-        
-        // Spawn 4 enemy minions per lane
-        for (let i = 0; i < 4; i++) {
-          // Add some random offset to prevent minions from stacking
-          const offsetX = (Math.random() - 0.5) * 2;
-          const offsetZ = (Math.random() - 0.5) * 2;
-          const spawnPos = new THREE.Vector3(
-            lane.enemySpawn.x + offsetX,
-            0,
-            lane.enemySpawn.z + offsetZ
-          );
-          
-          const minion = createMinion(spawnPos, 'enemy');
-          scene.add(minion);
-          minionsList.push(minion);
-        }
-      });
-      
-      // Update minions state
-      setMinions([...minionsList]);
-    };
-    
-    // Set up minion spawning interval
-    const spawnInterval = setInterval(spawnMinionWave, 30000); // Spawn every 30 seconds
-    
-    // Set up timer update interval
-    const timerInterval = setInterval(() => {
-      setNextSpawnTime(prev => Math.max(0, prev - 1));
-    }, 1000);
-    
-    // Spawn initial wave
-    spawnMinionWave();
-    
-    // Function to test damage on bases (for demonstration)
-    const testDamage = () => {
-      // Only for testing - in a real game, damage would come from player attacks
-      if (Math.random() > 0.5) {
-        allyBase.takeDamage(Math.random() * 10);
-        setGameState(prev => ({
-          ...prev,
-          allyBaseHealth: allyBase.health
-        }));
-      } else {
-        enemyBase.takeDamage(Math.random() * 10);
-        setGameState(prev => ({
-          ...prev,
-          enemyBaseHealth: enemyBase.health
-        }));
-      }
-      
-      // Check for game over
-      if (allyBase.isDestroyed) {
-        setGameState(prev => ({
-          ...prev,
-          gameOver: true,
-          winner: 'enemy'
-        }));
-      } else if (enemyBase.isDestroyed) {
-        setGameState(prev => ({
-          ...prev,
-          gameOver: true,
-          winner: 'ally'
-        }));
-      }
-    };
-    
-    // Function to test damage on towers (for demonstration)
-    const testTowerDamage = () => {
-      // Only for testing - in a real game, damage would come from player attacks
-      towersRef.current.allyTower1?.takeDamage(Math.random() * 30);
-      towersRef.current.allyTower2?.takeDamage(Math.random() * 30);
-      towersRef.current.enemyTower1?.takeDamage(Math.random() * 30);
-      towersRef.current.enemyTower2?.takeDamage(Math.random() * 30);
-    };
-    
-    // Function to test damage on player (for demonstration)
-    const testPlayerDamage = () => {
-      // Only for testing - in a real game, damage would come from enemy attacks
-      character.health -= Math.random() * 10;
-      if (character.health < 0) character.health = 0;
-      updatePlayerHealthBar();
-    };
-    
-    // Function to test damage on monuments (for demonstration)
-    const testMonumentDamage = () => {
-      // Only for testing - in a real game, damage would come from player attacks
-      if (allyBase.userData.objective && allyBase.userData.objective.userData.takeDamage) {
-        allyBase.userData.objective.userData.takeDamage(Math.random() * 20);
-        
-        // Update state for UI
-        setMonumentHealth(prev => ({
-          ...prev,
-          ally: {
-            current: allyBase.userData.objective.userData.health,
-            max: allyBase.userData.objective.userData.maxHealth
-          }
-        }));
-      }
-      
-      if (enemyBase.userData.objective && enemyBase.userData.objective.userData.takeDamage) {
-        enemyBase.userData.objective.userData.takeDamage(Math.random() * 20);
-        
-        // Update state for UI
-        setMonumentHealth(prev => ({
-          ...prev,
-          enemy: {
-            current: enemyBase.userData.objective.userData.health,
-            max: enemyBase.userData.objective.userData.maxHealth
-          }
-        }));
-      }
-    };
-    
-    // Function to heal player (for demonstration)
-    const healPlayer = (amount: number) => {
-      character.health = Math.min(character.maxHealth, character.health + amount);
-      updatePlayerHealthBar();
-    };
-    
-    // Add event listener for testing damage (press 'D' key)
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'd' || event.key === 'D') {
-        testDamage();
-      } else if (event.key === 't' || event.key === 'T') {
-        testTowerDamage();
-      } else if (event.key === 'p' || event.key === 'P') {
-        testPlayerDamage();
-      } else if (event.key === 'h' || event.key === 'H') {
-        // Heal player (for testing)
-        healPlayer(20);
-      } else if (event.key === 'm' || event.key === 'M') {
-        testMonumentDamage();
-      }
-    };
-    
-    window.addEventListener('keydown', onKeyDown);
-    
-    scene.add(mapStructure);
     
     // Add map boundary outline (showing the playable area)
     const boundaryGeometry = new THREE.BufferGeometry();
@@ -1224,47 +325,7 @@ const BaseScene = () => {
     laneSquareLines.computeLineDistances();
     
     scene.add(laneSquareLines);
-
-    // Add inner cyan square outline (5 units inside lane square)
-    const innerCyanSize = LANE_SQUARE_SIZE - 10; // 5 units on each side
-    const innerCyanGeometry = new THREE.BufferGeometry();
-    const innerCyanVertices = new Float32Array([
-      // Draw a square using lines
-      -innerCyanSize/2, 0, -innerCyanSize/2,  // Start at top-left
-      innerCyanSize/2, 0, -innerCyanSize/2,   // Top line
-      innerCyanSize/2, 0, -innerCyanSize/2,   // Start at top-right
-      innerCyanSize/2, 0, innerCyanSize/2,    // Right line
-      innerCyanSize/2, 0, innerCyanSize/2,    // Start at bottom-right
-      -innerCyanSize/2, 0, innerCyanSize/2,   // Bottom line
-      -innerCyanSize/2, 0, innerCyanSize/2,   // Start at bottom-left
-      -innerCyanSize/2, 0, -innerCyanSize/2   // Left line
-    ]);
-    innerCyanGeometry.setAttribute('position', new THREE.Float32BufferAttribute(innerCyanVertices, 3));
-    const innerCyanMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
-    const innerCyanLines = new THREE.LineSegments(innerCyanGeometry, innerCyanMaterial);
-    innerCyanLines.position.y = 0.16; // Slightly above the lane square lines
-    scene.add(innerCyanLines);
-
-    // Add outer cyan square outline (5 units outside lane square)
-    const outerCyanSize = LANE_SQUARE_SIZE + 10; // 5 units on each side
-    const outerCyanGeometry = new THREE.BufferGeometry();
-    const outerCyanVertices = new Float32Array([
-      // Draw a square using lines
-      -outerCyanSize/2, 0, -outerCyanSize/2,  // Start at top-left
-      outerCyanSize/2, 0, -outerCyanSize/2,   // Top line
-      outerCyanSize/2, 0, -outerCyanSize/2,   // Start at top-right
-      outerCyanSize/2, 0, outerCyanSize/2,    // Right line
-      outerCyanSize/2, 0, outerCyanSize/2,    // Start at bottom-right
-      -outerCyanSize/2, 0, outerCyanSize/2,   // Bottom line
-      -outerCyanSize/2, 0, outerCyanSize/2,   // Start at bottom-left
-      -outerCyanSize/2, 0, -outerCyanSize/2   // Left line
-    ]);
-    outerCyanGeometry.setAttribute('position', new THREE.Float32BufferAttribute(outerCyanVertices, 3));
-    const outerCyanMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
-    const outerCyanLines = new THREE.LineSegments(outerCyanGeometry, outerCyanMaterial);
-    outerCyanLines.position.y = 0.16; // Slightly above the lane square lines
-    scene.add(outerCyanLines);
-
+    
     // Add cross lines across the map
     const crossLinesGeometry = new THREE.BufferGeometry();
     const crossVertices = new Float32Array([
@@ -1290,1130 +351,214 @@ const BaseScene = () => {
     crossLines.computeLineDistances();
     
     scene.add(crossLines); // Add the diagonal lines
-
-    // Add parallel blue lines to create bands around the diagonals
-    const createParallelLine = (startPoint: THREE.Vector3, endPoint: THREE.Vector3, offset: number): THREE.Line => {
-      // Calculate direction vector
-      const direction = new THREE.Vector3().subVectors(endPoint, startPoint).normalize();
-      
-      // Calculate perpendicular vector (in XZ plane)
-      const perpendicular = new THREE.Vector3(-direction.z, 0, direction.x).normalize().multiplyScalar(offset);
-      
-      // Create offset points
-      const offsetStart = new THREE.Vector3().addVectors(startPoint, perpendicular);
-      const offsetEnd = new THREE.Vector3().addVectors(endPoint, perpendicular);
-      
-      // Create geometry
-      const geometry = new THREE.BufferGeometry().setFromPoints([offsetStart, offsetEnd]);
-      const material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
-      
-      return new THREE.Line(geometry, material);
-    };
     
-    // Diagonal (bottom-left to top-right) - extended to map corners
-    const diagStart = new THREE.Vector3(-PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2);
-    const diagEnd = new THREE.Vector3(PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2);
+    // Add map to scene
+    scene.add(mapStructure);
     
-    // Second diagonal (top-left to bottom-right) - extended to map corners
-    const diag2Start = new THREE.Vector3(-PLAYABLE_AREA/2, 0, -PLAYABLE_AREA/2);
-    const diag2End = new THREE.Vector3(PLAYABLE_AREA/2, 0, PLAYABLE_AREA/2);
-    
-    // Create parallel lines (5 units on each side for a total width of 10)
-    const offset = 5;
-    
-    // Parallel lines for the first diagonal
-    const diagLine1 = createParallelLine(diagStart, diagEnd, offset);
-    const diagLine2 = createParallelLine(diagStart, diagEnd, -offset);
-    
-    // Parallel lines for the second diagonal
-    const diag2Line1 = createParallelLine(diag2Start, diag2End, offset);
-    const diag2Line2 = createParallelLine(diag2Start, diag2End, -offset);
-    
-    // Position slightly above ground but below the red lines
-    diagLine1.position.y = 0.22;
-    diagLine2.position.y = 0.22;
-    diag2Line1.position.y = 0.22;
-    diag2Line2.position.y = 0.22;
-    
-    // Add to scene
-    scene.add(diagLine1);
-    scene.add(diagLine2);
-    scene.add(diag2Line1);
-    scene.add(diag2Line2);
-
-    // Create diagonal lane path
-    const createDiagonalLanePath = (start: THREE.Vector3, end: THREE.Vector3, width: number, y: number = 0.05): THREE.Mesh => {
-      // Calculate direction and length
-      const direction = new THREE.Vector3().subVectors(end, start).normalize();
-      const length = start.distanceTo(end);
-      
-      // Create lane geometry
-      const geometry = new THREE.PlaneGeometry(length, width);
-      const material = new THREE.MeshStandardMaterial({ 
-        color: 0x8B4513, // Brown color for lanes
-        roughness: 0.9,
-        metalness: 0.1,
-        side: THREE.DoubleSide
-      });
-      
-      const mesh = new THREE.Mesh(geometry, material);
-      
-      // Position at midpoint
-      const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-      mesh.position.copy(midpoint);
-      mesh.position.y = y;
-      
-      // Calculate rotation to align with direction
-      const angle = Math.atan2(direction.z, direction.x);
-      mesh.rotation.y = -angle + Math.PI / 2;
-      mesh.rotation.x = -Math.PI / 2;
-      
-      mesh.receiveShadow = true;
-      
-      return mesh;
-    };
-    
-    // Add diagonal lane path - commented out to remove the 3D mesh
-    // const diagPath = createDiagonalLanePath(diagStart, diagEnd, 10);
-    // scene.add(diagPath);
-
-    // Mouse movement and pointer lock
-    let euler = new THREE.Euler(0, 0, 0, 'YXZ');
-    let prevTime = performance.now();
-    
-    // Update mouse movement handler for MOBA-style camera
-    const onMouseMove = (event: MouseEvent) => {
-      // Disable mouse look - camera angle is fixed in MOBA-style games
-      return;
-    };
-    
-    // Update right-click handler for movement
-    const onMouseClick = (event: MouseEvent) => {
-      if (event.button !== 2 || !isControlsEnabled) return; // Only handle right click
-      
-      event.preventDefault();
-      
-      // Create a raycaster
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2(
-        (event.clientX / window.innerWidth) * 2 - 1,
-        -(event.clientY / window.innerHeight) * 2 + 1
-      );
-      
-      raycaster.setFromCamera(mouse, camera);
-      
-      // Check intersection with the ground plane
-      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const intersectionPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
-      
-      // Clamp the target position within playable area boundaries
-      intersectionPoint.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, intersectionPoint.x));
-      intersectionPoint.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, intersectionPoint.z));
-      
-      // Set new target position
-      character.targetPosition = intersectionPoint;
-      
-      // Check if the target is on a base to adjust the indicator height
-      const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
-      const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
-      
-      // Calculate distance to base centers
-      const distToAllyBase = new THREE.Vector2(intersectionPoint.x - allyBasePos.x, intersectionPoint.z - allyBasePos.z).length();
-      const distToEnemyBase = new THREE.Vector2(intersectionPoint.x - enemyBasePos.x, intersectionPoint.z - enemyBasePos.z).length();
-      
-      // Base properties
-      const baseRadius = 18; // Radius of the base platform
-      const baseHeight = 3.25; // Height of the base platform
-      const transitionZone = 5; // Width of the transition zone for smooth height change
-      
-      // Determine indicator height based on whether it's on a base
-      let indicatorHeight = 0.1; // Default height slightly above ground
-      
-      // Check if on ally base or in transition zone
-      if (distToAllyBase < baseRadius - transitionZone) {
-        // Fully on the base
-        indicatorHeight = baseHeight + 0.1; // Slightly above the base surface
-      } else if (distToAllyBase < baseRadius) {
-        // In the transition zone - calculate gradual height
-        const transitionProgress = 1 - ((distToAllyBase - (baseRadius - transitionZone)) / transitionZone);
-        indicatorHeight = (baseHeight * transitionProgress) + 0.1;
+    // Define lane paths for minion spawning
+    const lanes = [
+      {
+        name: 'top',
+        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 15, 0, -LANE_SQUARE_SIZE/2 + 15), // Further from base
+        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 15, 0, -LANE_SQUARE_SIZE/2 + 15) // Further from base
+      },
+      {
+        name: 'mid',
+        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 15, 0, LANE_SQUARE_SIZE/2 - 15), // Further from base
+        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 15, 0, -LANE_SQUARE_SIZE/2 + 15) // Further from base
+      },
+      {
+        name: 'bottom',
+        allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 15, 0, LANE_SQUARE_SIZE/2 - 15), // Further from base
+        enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 15, 0, LANE_SQUARE_SIZE/2 - 15) // Further from base
       }
-      // Check if on enemy base or in transition zone (only if not already on ally base)
-      else if (distToEnemyBase < baseRadius - transitionZone) {
-        // Fully on the base
-        indicatorHeight = baseHeight + 0.1; // Slightly above the base surface
-      } else if (distToEnemyBase < baseRadius) {
-        // In the transition zone - calculate gradual height
-        const transitionProgress = 1 - ((distToEnemyBase - (baseRadius - transitionZone)) / transitionZone);
-        indicatorHeight = (baseHeight * transitionProgress) + 0.1;
+    ];
+    
+    // Add health to the central monument in each base
+    const addHealthToMonument = (base: THREE.Group & GameObjectWithHealth) => {
+      // Add health properties to the central monument
+      if (base.userData.objective) {
+        const monument = base.userData.objective;
+        
+        // Set health properties
+        monument.userData.health = 2000;
+        monument.userData.maxHealth = 2000;
+        monument.userData.isDestroyed = false;
+        monument.userData.attackCooldown = 0;
+        monument.userData.attackRange = 20; // Range for monument attacks
+        monument.userData.damage = 15;
+        monument.userData.team = base === basesRef.current.allyBase ? 'ally' : 'enemy';
+        
+        // Create a health bar for the monument
+        const healthBarWidth = 5;
+        const healthBarHeight = 0.5;
+        const healthBarYOffset = 12; // Position above the monument
+        
+        monument.userData.healthBar = createHealthBar(
+          healthBarWidth, 
+          healthBarHeight, 
+          monument.position, 
+          healthBarYOffset
+        );
+        monument.add(monument.userData.healthBar);
+        
+        // Add method to update health bar
+        monument.userData.updateHealthBar = () => {
+          if (!monument.userData.healthBar) return;
+          
+          const healthPercent = monument.userData.health / monument.userData.maxHealth;
+          
+          // Get canvas context
+          const context = monument.userData.healthBar.userData.context as CanvasRenderingContext2D;
+          const canvas = monument.userData.healthBar.userData.canvas as HTMLCanvasElement;
+          const texture = monument.userData.healthBar.userData.texture as THREE.CanvasTexture;
+          
+          if (!context || !canvas || !texture) return;
+          
+          // Clear canvas
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw background (gray)
+          context.fillStyle = '#444444';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw health with color based on percentage
+          if (healthPercent > 0.6) {
+            context.fillStyle = '#00ff00'; // Green
+          } else if (healthPercent > 0.3) {
+            context.fillStyle = '#ffff00'; // Yellow
+          } else {
+            context.fillStyle = '#ff0000'; // Red
+          }
+          
+          const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
+          context.fillRect(0, 0, healthWidth, canvas.height);
+          
+          // Update texture
+          texture.needsUpdate = true;
+        };
+        
+        // Add method to take damage
+        monument.userData.takeDamage = (amount: number) => {
+          if (monument.userData.health <= 0 || monument.userData.isDestroyed) return;
+          
+          monument.userData.health -= amount;
+          
+          // Update state for UI
+          setMonumentHealth(prev => ({
+            ...prev,
+            [monument.userData.team]: {
+              current: monument.userData.health,
+              max: monument.userData.maxHealth
+            }
+          }));
+          
+          if (monument.userData.health <= 0) {
+            monument.userData.health = 0;
+            monument.userData.isDestroyed = true;
+            
+            // Handle monument destruction
+            const material = (monument as THREE.Mesh).material as THREE.MeshStandardMaterial;
+            material.color.set(0x555555);
+            material.emissive.set(0x000000);
+            
+            // Update game state
+            setGameState(prev => ({
+              ...prev,
+              gameOver: true,
+              winner: monument.userData.team === 'ally' ? 'enemy' : 'ally'
+            }));
+          }
+          
+          monument.userData.updateHealthBar();
+        };
+        
+        // Initialize health bar
+        monument.userData.updateHealthBar();
       }
-      
-      // Update target indicator position
-      targetIndicator.position.copy(intersectionPoint);
-      targetIndicator.position.y = indicatorHeight;
-      targetIndicator.visible = true;
-      
-      setTimeout(() => {
-        targetIndicator.visible = false;
-      }, 1000);
     };
     
-    // Prevent context menu on right click
-    const onContextMenu = (event: Event) => {
-      event.preventDefault();
-    };
-    
+    // Handle window resize
     const onWindowResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     };
+    window.addEventListener('resize', onWindowResize);
     
-    // Update movement controls for MOBA-style movement
-    const updateMovement = () => {
-      if (character.targetPosition) {
-        // Calculate direction to target
-        const direction = new THREE.Vector3()
-          .subVectors(character.targetPosition, character.position)
-          .setY(0);
-        
-        // Check if we're close enough to stop
-        if (direction.length() < 0.1) {
-          character.targetPosition = null;
-          character.direction.set(0, 0, 0);
-        } else {
-          // Normalize direction and set character movement
-          direction.normalize();
-          character.direction.copy(direction);
-          character.model.rotation.y = Math.atan2(direction.x, direction.z);
-        }
-      }
-      
-      // Calculate new position
-      const moveSpeed = character.keys.sprint ? character.speed * 1.5 : character.speed;
-      const newX = character.position.x + character.direction.x * moveSpeed;
-      const newZ = character.position.z + character.direction.z * moveSpeed;
-      
-      // Create a new potential position
-      const newPosition = new THREE.Vector3(newX, character.position.y, newZ);
-      
-      // Check for collisions with bases
-      const allyBasePos = new THREE.Vector3(-LANE_SQUARE_SIZE/2, 0, LANE_SQUARE_SIZE/2);
-      const enemyBasePos = new THREE.Vector3(LANE_SQUARE_SIZE/2, 0, -LANE_SQUARE_SIZE/2);
-      
-      // Calculate distance to base centers
-      const distToAllyBase = new THREE.Vector2(newPosition.x - allyBasePos.x, newPosition.z - allyBasePos.z).length();
-      const distToEnemyBase = new THREE.Vector2(newPosition.x - enemyBasePos.x, newPosition.z - enemyBasePos.z).length();
-      
-      // Base properties
-      const baseRadius = 18; // Radius of the base platform
-      const baseHeight = 3.25; // Height of the base platform
-      const transitionZone = 5; // Width of the transition zone for smooth height change
-      
-      // Check for collisions with central towers
-      let collisionWithTower = false;
-      
-      // Character collision radius
-      const characterRadius = 0.5;
-      
-      // Check collision with ally base tower
-      if (basesRef.current.allyBase && basesRef.current.allyBase.userData.objective) {
-        const objectiveRadius = basesRef.current.allyBase.userData.objectiveRadius;
-        const totalCollisionRadius = objectiveRadius + characterRadius;
-        const distToAllyTower = new THREE.Vector2(newPosition.x - allyBasePos.x, newPosition.z - allyBasePos.z).length();
-        
-        if (distToAllyTower < totalCollisionRadius) {
-          collisionWithTower = true;
-        }
-      }
-      
-      // Check collision with enemy base tower
-      if (!collisionWithTower && basesRef.current.enemyBase && basesRef.current.enemyBase.userData.objective) {
-        const objectiveRadius = basesRef.current.enemyBase.userData.objectiveRadius;
-        const totalCollisionRadius = objectiveRadius + characterRadius;
-        const distToEnemyTower = new THREE.Vector2(newPosition.x - enemyBasePos.x, newPosition.z - enemyBasePos.z).length();
-        
-        if (distToEnemyTower < totalCollisionRadius) {
-          collisionWithTower = true;
-        }
-      }
-      
-      // Check for proximity to enemy towers and take damage if too close
-      const checkTowerDamageToPlayer = () => {
-        // Only check if player is alive
-        if (character.health <= 0) return;
-        
-        // Check distance to enemy towers
-        [towersRef.current.enemyTower1, towersRef.current.enemyTower2]
-          .filter(Boolean)
-          .forEach(tower => {
-            if (tower!.isDestroyed) return;
-            
-            const distToTower = character.position.distanceTo(tower!.position);
-            const towerAttackRange = tower!.shootingRange;
-            
-            // If player is within tower attack range, take damage
-            if (distToTower < towerAttackRange) {
-              // Create projectile effect from tower to player
-              const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
-              const projectileMaterial = new THREE.MeshBasicMaterial({
-                color: 0xff00ff,
-                transparent: true,
-                opacity: 0.8
-              });
-              const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-              projectile.position.copy(tower!.position);
-              projectile.position.y += 5; // Start at tower's top
-              scene.add(projectile);
-              
-              // Animate projectile
-              const startPos = projectile.position.clone();
-              const endPos = character.model.position.clone();
-              endPos.y += 1; // Aim at upper body
-              
-              const animateProjectile = (progress: number) => {
-                if (progress >= 1) {
-                  scene.remove(projectile);
-                  // Deal damage when projectile hits
-                  character.health -= 5; // Tower deals 5 damage per hit
-                  if (character.health < 0) character.health = 0;
-                  updatePlayerHealthBar();
-                  return;
-                }
-                
-                // Lerp position
-                projectile.position.lerpVectors(startPos, endPos, progress);
-                
-                // Continue animation
-                requestAnimationFrame(() => animateProjectile(progress + 0.05));
-              };
-              
-              animateProjectile(0);
-              
-              // Set tower cooldown
-              tower!.attackCooldown = 60; // 60 frames = 1 second at 60fps
-            }
-          });
-        
-        // Check distance to enemy minions
-        minionsList.forEach(minion => {
-          if (minion.isDestroyed || minion.team !== 'enemy') return;
-          
-          const distToMinion = character.position.distanceTo(minion.position);
-          
-          // If player is within minion attack range and minion is not attacking something else
-          if (distToMinion < minion.attackRange && !minion.attackTarget) {
-            // Set player as target
-            minion.attackTarget = character.model;
-            
-            // If minion can attack (cooldown is 0)
-            if (minion.attackCooldown <= 0) {
-              // Create projectile effect
-              const projectileGeometry = new THREE.SphereGeometry(0.1, 8, 8);
-              const projectileMaterial = new THREE.MeshBasicMaterial({
-                color: 0xff00ff,
-                transparent: true,
-                opacity: 0.8
-              });
-              const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-              projectile.position.copy(minion.position);
-              projectile.position.y += 0.8; // Start at minion's head level
-              scene.add(projectile);
-              
-              // Animate projectile
-              const startPos = projectile.position.clone();
-              const endPos = character.model.position.clone();
-              endPos.y += 1; // Aim at upper body
-              
-              const animateProjectile = (progress: number) => {
-                if (progress >= 1) {
-                  scene.remove(projectile);
-                  // Deal damage when projectile hits
-                  character.health -= minion.damage;
-                  if (character.health < 0) character.health = 0;
-                  updatePlayerHealthBar();
-                  return;
-                }
-                
-                // Lerp position
-                projectile.position.lerpVectors(startPos, endPos, progress);
-                
-                // Continue animation
-                requestAnimationFrame(() => animateProjectile(progress + 0.1));
-              };
-              
-              animateProjectile(0);
-              
-              // Set cooldown
-              minion.attackCooldown = 60; // 60 frames = 1 second at 60fps
-            }
-          }
-        });
-      };
-      
-      // Determine if character is on a base and adjust height
-      let characterHeight = 0;
-      
-      // Check if on ally base or in transition zone
-      if (distToAllyBase < baseRadius - transitionZone) {
-        // Fully on the base
-        characterHeight = baseHeight;
-      } else if (distToAllyBase < baseRadius) {
-        // In the transition zone - calculate gradual height
-        const transitionProgress = 1 - ((distToAllyBase - (baseRadius - transitionZone)) / transitionZone);
-        characterHeight = baseHeight * transitionProgress;
-      }
-      // Check if on enemy base or in transition zone (only if not already on ally base)
-      else if (distToEnemyBase < baseRadius - transitionZone) {
-        // Fully on the base
-        characterHeight = baseHeight;
-      } else if (distToEnemyBase < baseRadius) {
-        // In the transition zone - calculate gradual height
-        const transitionProgress = 1 - ((distToEnemyBase - (baseRadius - transitionZone)) / transitionZone);
-        characterHeight = baseHeight * transitionProgress;
-      }
-      
-      // Update position - allow movement if no collision with towers
-      if (!collisionWithTower) {
-        character.position.x = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newX));
-        character.position.z = Math.max(-PLAYABLE_AREA/2, Math.min(PLAYABLE_AREA/2, newZ));
-      } else {
-        // If collision with tower, cancel target position
-        character.targetPosition = null;
-        character.direction.set(0, 0, 0);
-      }
-      
-      character.position.y = characterHeight; // Set height based on whether on a base
-      
-      // Update character model position
-      character.model.position.set(character.position.x, character.position.y + 1, character.position.z);
-      
-      // Update camera position to follow character
-      camera.position.x = character.position.x + cameraOffset.x;
-      camera.position.y = character.position.y + cameraOffset.y;
-      camera.position.z = character.position.z + cameraOffset.z;
-      camera.lookAt(character.position);
-      
-      // If character hits boundary, clear target position
-      if (
-        character.position.x === -PLAYABLE_AREA/2 || 
-        character.position.x === PLAYABLE_AREA/2 ||
-        character.position.z === -PLAYABLE_AREA/2 || 
-        character.position.z === PLAYABLE_AREA/2
-      ) {
-        character.targetPosition = null;
-        character.direction.set(0, 0, 0);
-      }
-      
-      // Check if player should take damage from enemy towers or minions
-      checkTowerDamageToPlayer();
-    };
+    // Animation loop
+    let frameCount = 0;
+    let prevTime = performance.now();
     
-    // Add tower shooting functionality
-    const updateTowerAttacks = () => {
-      // Check if ally towers can attack enemy minions
-      [towersRef.current.allyTower1, towersRef.current.allyTower2]
-        .filter(Boolean)
-        .forEach(tower => {
-          if (tower!.isDestroyed || tower!.attackCooldown > 0) return;
-          
-          // Find closest enemy minion within range
-          let closestEnemy: Minion | null = null;
-          let closestDistance = Infinity;
-          
-          minionsList.forEach(minion => {
-            if (minion.isDestroyed || minion.team === 'ally') return;
-            
-            const distance = tower!.position.distanceTo(minion.position);
-            if (distance <= tower!.shootingRange && distance < closestDistance) {
-              closestEnemy = minion;
-              closestDistance = distance;
-            }
-          });
-          
-          // Attack if enemy found
-          if (closestEnemy) {
-            // Create projectile effect
-            const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
-            const projectileMaterial = new THREE.MeshBasicMaterial({
-              color: 0x00ffff,
-              transparent: true,
-              opacity: 0.8
-            });
-            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-            projectile.position.copy(tower!.position);
-            projectile.position.y += 5; // Start at tower's top
-            scene.add(projectile);
-            
-            // Animate projectile
-            const startPos = projectile.position.clone();
-            const endPos = (closestEnemy as THREE.Object3D).position.clone();
-            endPos.y += 1; // Aim at upper body
-            
-            const animateProjectile = (progress: number) => {
-              if (progress >= 1) {
-                scene.remove(projectile);
-                // Deal damage when projectile hits (2 shots to kill)
-                closestEnemy!.takeDamage(50);
-                return;
-              }
-              
-              // Lerp position
-              projectile.position.lerpVectors(startPos, endPos, progress);
-              
-              // Continue animation
-              requestAnimationFrame(() => animateProjectile(progress + 0.05));
-            };
-            
-            animateProjectile(0);
-            
-            // Set cooldown
-            tower!.attackCooldown = 45; // 45 frames = 0.75 seconds at 60fps
-          }
-        });
-      
-      // Check if enemy towers can attack ally minions
-      [towersRef.current.enemyTower1, towersRef.current.enemyTower2]
-        .filter(Boolean)
-        .forEach(tower => {
-          if (tower!.isDestroyed || tower!.attackCooldown > 0) return;
-          
-          // Find closest ally minion within range
-          let closestEnemy: Minion | null = null;
-          let closestDistance = Infinity;
-          
-          minionsList.forEach(minion => {
-            if (minion.isDestroyed || minion.team === 'enemy') return;
-            
-            const distance = tower!.position.distanceTo(minion.position);
-            if (distance <= tower!.shootingRange && distance < closestDistance) {
-              closestEnemy = minion;
-              closestDistance = distance;
-            }
-          });
-          
-          // Attack if enemy found
-          if (closestEnemy) {
-            // Create projectile effect
-            const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
-            const projectileMaterial = new THREE.MeshBasicMaterial({
-              color: 0xff00ff,
-              transparent: true,
-              opacity: 0.8
-            });
-            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-            projectile.position.copy(tower!.position);
-            projectile.position.y += 5; // Start at tower's top
-            scene.add(projectile);
-            
-            // Animate projectile
-            const startPos = projectile.position.clone();
-            const endPos = (closestEnemy as THREE.Object3D).position.clone();
-            endPos.y += 1; // Aim at upper body
-            
-            const animateProjectile = (progress: number) => {
-              if (progress >= 1) {
-                scene.remove(projectile);
-                // Deal damage when projectile hits (2 shots to kill)
-                closestEnemy!.takeDamage(50);
-                return;
-              }
-              
-              // Lerp position
-              projectile.position.lerpVectors(startPos, endPos, progress);
-              
-              // Continue animation
-              requestAnimationFrame(() => animateProjectile(progress + 0.05));
-            };
-            
-            animateProjectile(0);
-            
-            // Set cooldown
-            tower!.attackCooldown = 45; // 45 frames = 0.75 seconds at 60fps
-          }
-        });
-      
-      // Check if minions can attack enemies
-      minionsList.forEach(minion => {
-        if (minion.isDestroyed) return;
-        
-        // Skip if already has a target
-        if (minion.attackTarget) return;
-        
-        // Find closest enemy (minion, tower, or base)
-        let closestEnemy: THREE.Object3D | null = null;
-        let closestDistance = Infinity;
-        
-        // Check enemy minions
-        minionsList.forEach(otherMinion => {
-          if (otherMinion.isDestroyed || otherMinion.team === minion.team) return;
-          
-          const distance = minion.position.distanceTo(otherMinion.position);
-          if (distance <= minion.attackRange && distance < closestDistance) {
-            closestEnemy = otherMinion;
-            closestDistance = distance;
-          }
-        });
-        
-        // Check enemy towers
-        const enemyTowers = minion.team === 'ally' 
-          ? [towersRef.current.enemyTower1, towersRef.current.enemyTower2].filter(Boolean) as Tower[]
-          : [towersRef.current.allyTower1, towersRef.current.allyTower2].filter(Boolean) as Tower[];
-        
-        enemyTowers.forEach(tower => {
-          if (tower!.isDestroyed) return;
-          
-          const distance = minion.position.distanceTo(tower!.position);
-          if (distance <= minion.attackRange && distance < closestDistance) {
-            closestEnemy = tower;
-            closestDistance = distance;
-          }
-        });
-        
-        // Check enemy base
-        const targetBase = minion.team === 'ally' ? basesRef.current.enemyBase : basesRef.current.allyBase;
-        if (targetBase) {
-          const distanceToBase = minion.position.distanceTo(targetBase.position);
-          
-          if (distanceToBase <= minion.attackRange + 15 && distanceToBase < closestDistance) {
-            closestEnemy = targetBase;
-            closestDistance = distanceToBase;
-          }
-        }
-        
-        // Set target if found
-        if (closestEnemy) {
-          minion.attackTarget = closestEnemy;
-        }
-      });
-    };
-    
-    // Add monument shooting functionality
-    const updateMonumentAttacks = () => {
-      // Check if ally monument can attack enemy minions
-      if (basesRef.current.allyBase && 
-          basesRef.current.allyBase.userData.objective && 
-          !basesRef.current.allyBase.userData.objective.userData.isDestroyed) {
-        
-        const monument = basesRef.current.allyBase.userData.objective;
-        
-        // Decrease cooldown
-        if (monument.userData.attackCooldown > 0) {
-          monument.userData.attackCooldown--;
-        }
-        
-        // If can attack
-        if (monument.userData.attackCooldown <= 0) {
-          // Find closest enemy minion within range
-          let closestEnemy: Minion | null = null;
-          let closestDistance = Infinity;
-          
-          minionsList.forEach(minion => {
-            if (minion.isDestroyed || minion.team !== 'enemy') return;
-            
-            const distance = minion.position.distanceTo(basesRef.current.allyBase!.position);
-            if (distance <= monument.userData.attackRange && distance < closestDistance) {
-              closestEnemy = minion;
-              closestDistance = distance;
-            }
-          });
-          
-          // Attack if enemy found
-          if (closestEnemy) {
-            // Create projectile effect
-            const projectileGeometry = new THREE.SphereGeometry(0.3, 8, 8);
-            const projectileMaterial = new THREE.MeshBasicMaterial({
-              color: 0x00ffff,
-              transparent: true,
-              opacity: 0.8
-            });
-            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-            projectile.position.copy(monument.position);
-            projectile.position.y += 8; // Start at monument's top
-            scene.add(projectile);
-            
-            // Animate projectile
-            const startPos = projectile.position.clone();
-            const endPos = (closestEnemy as THREE.Object3D).position.clone();
-            endPos.y += 1; // Aim at upper body
-            
-            const animateProjectile = (progress: number) => {
-              if (progress >= 1) {
-                scene.remove(projectile);
-                // Deal damage when projectile hits
-                closestEnemy!.takeDamage(monument.userData.damage);
-                return;
-              }
-              
-              // Lerp position
-              projectile.position.lerpVectors(startPos, endPos, progress);
-              
-              // Continue animation
-              requestAnimationFrame(() => animateProjectile(progress + 0.05));
-            };
-            
-            animateProjectile(0);
-            
-            // Set cooldown
-            monument.userData.attackCooldown = 45; // 45 frames = 0.75 seconds at 60fps
-          }
-        }
-      }
-      
-      // Check if enemy monument can attack ally minions
-      if (basesRef.current.enemyBase && 
-          basesRef.current.enemyBase.userData.objective && 
-          !basesRef.current.enemyBase.userData.objective.userData.isDestroyed) {
-        
-        const monument = basesRef.current.enemyBase.userData.objective;
-        
-        // Decrease cooldown
-        if (monument.userData.attackCooldown > 0) {
-          monument.userData.attackCooldown--;
-        }
-        
-        // If can attack
-        if (monument.userData.attackCooldown <= 0) {
-          // Find closest ally minion within range
-          let closestEnemy: Minion | null = null;
-          let closestDistance = Infinity;
-          
-          minionsList.forEach(minion => {
-            if (minion.isDestroyed || minion.team !== 'ally') return;
-            
-            const distance = minion.position.distanceTo(basesRef.current.enemyBase!.position);
-            if (distance <= monument.userData.attackRange && distance < closestDistance) {
-              closestEnemy = minion;
-              closestDistance = distance;
-            }
-          });
-          
-          // Attack if enemy found
-          if (closestEnemy) {
-            // Create projectile effect
-            const projectileGeometry = new THREE.SphereGeometry(0.3, 8, 8);
-            const projectileMaterial = new THREE.MeshBasicMaterial({
-              color: 0xff00ff,
-              transparent: true,
-              opacity: 0.8
-            });
-            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-            projectile.position.copy(monument.position);
-            projectile.position.y += 8; // Start at monument's top
-            scene.add(projectile);
-            
-            // Animate projectile
-            const startPos = projectile.position.clone();
-            const endPos = (closestEnemy as THREE.Object3D).position.clone();
-            endPos.y += 1; // Aim at upper body
-            
-            const animateProjectile = (progress: number) => {
-              if (progress >= 1) {
-                scene.remove(projectile);
-                // Deal damage when projectile hits
-                closestEnemy!.takeDamage(monument.userData.damage);
-                return;
-              }
-              
-              // Lerp position
-              projectile.position.lerpVectors(startPos, endPos, progress);
-              
-              // Continue animation
-              requestAnimationFrame(() => animateProjectile(progress + 0.05));
-            };
-            
-            animateProjectile(0);
-            
-            // Set cooldown
-            monument.userData.attackCooldown = 45; // 45 frames = 0.75 seconds at 60fps
-          }
-          
-          // Check if player is in range and attack them too
-          if (character.health > 0 && character.model.visible) {
-            const distToPlayer = character.position.distanceTo(basesRef.current.enemyBase!.position);
-            if (distToPlayer <= monument.userData.attackRange) {
-              // Create projectile effect
-              const projectileGeometry = new THREE.SphereGeometry(0.3, 8, 8);
-              const projectileMaterial = new THREE.MeshBasicMaterial({
-                color: 0xff00ff,
-                transparent: true,
-                opacity: 0.8
-              });
-              const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
-              projectile.position.copy(monument.position);
-              projectile.position.y += 8; // Start at monument's top
-              scene.add(projectile);
-              
-              // Animate projectile
-              const startPos = projectile.position.clone();
-              const endPos = character.model.position.clone();
-              endPos.y += 1; // Aim at upper body
-              
-              const animateProjectile = (progress: number) => {
-                if (progress >= 1) {
-                  scene.remove(projectile);
-                  // Deal damage when projectile hits
-                  character.health -= monument.userData.damage;
-                  if (character.health < 0) character.health = 0;
-                  updatePlayerHealthBar();
-                  return;
-                }
-                
-                // Lerp position
-                projectile.position.lerpVectors(startPos, endPos, progress);
-                
-                // Continue animation
-                requestAnimationFrame(() => animateProjectile(progress + 0.05));
-              };
-              
-              animateProjectile(0);
-              
-              // Set cooldown
-              monument.userData.attackCooldown = 60; // 60 frames = 1 second at 60fps
-            }
-          }
-        }
-      }
-    };
-    
-    // Update animation loop
     const animate = () => {
-      const time = performance.now();
-      const delta = (time - prevTime) / 1000;
+      // Update minions
+      // ... existing minion update code ...
       
-      updateMovement();
-      
-      // Update tower attacks
-      updateTowerAttacks();
-      
-      // Update monument attacks
-      updateMonumentAttacks();
-      
-      // Update all minions
-      minionsList.forEach(minion => {
-        minion.update();
-      });
-      
-      // Decrease tower attack cooldowns
-      [towersRef.current.allyTower1, towersRef.current.allyTower2, 
-       towersRef.current.enemyTower1, towersRef.current.enemyTower2]
-        .filter(Boolean)
-        .forEach(tower => {
-          if (tower!.attackCooldown > 0) {
-            tower!.attackCooldown--;
-          }
-        });
-      
-      // Check if player is dead
-      if (character.health <= 0 && character.model.visible) {
-        // Player is dead, show visual effect
-        character.model.visible = false;
-        
-        // Create death explosion effect
-        const explosionGeometry = new THREE.SphereGeometry(1, 16, 16);
-        const explosionMaterial = new THREE.MeshBasicMaterial({
-          color: 0xffff00,
-          transparent: true,
-          opacity: 0.8
-        });
-        const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
-        explosion.position.copy(character.model.position);
-        scene.add(explosion);
-        
-        // Animate explosion and fade out
-        let scale = 1;
-        const expandExplosion = () => {
-          if (scale < 3) {
-            scale += 0.1;
-            explosion.scale.set(scale, scale, scale);
-            explosion.material.opacity -= 0.02;
-            requestAnimationFrame(expandExplosion);
-          } else {
-            scene.remove(explosion);
-          }
-        };
-        expandExplosion();
-        
-        // Set respawn timer
-        const respawnTime = 5; // 5 seconds
-        let respawnTimer = respawnTime;
-        
-        // Update respawn timer display
-        const updateRespawnTimer = () => {
-          setPlayerHealth(prev => ({
-            ...prev,
-            respawnTimer: respawnTimer
-          }));
-          
-          respawnTimer--;
-          
-          if (respawnTimer >= 0) {
-            setTimeout(updateRespawnTimer, 1000);
-          }
-        };
-        
-        updateRespawnTimer();
-        
-        // Respawn player after 5 seconds
-        setTimeout(() => {
-          character.health = character.maxHealth;
-          character.model.visible = true;
-          // Respawn at blue base
-          character.position.set(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5);
-          character.targetPosition = null;
-          updatePlayerHealthBar();
-          
-          // Clear respawn timer
-          setPlayerHealth(prev => ({
-            ...prev,
-            respawnTimer: undefined
-          }));
-        }, respawnTime * 1000);
-      }
-      
-      // Update player position state
-      setPlayerPos({ x: character.position.x, z: character.position.z });
-      
-      // Render main view
-      renderer.render(scene, camera);
+      // Update towers
+      // ... existing tower update code ...
       
       // Update FPS counter
-      setFps(Math.round(1 / delta));
-      prevTime = time;
+      const now = performance.now();
+      const delta = now - prevTime;
+      prevTime = now;
       
+      // Update FPS every 10 frames
+      if (frameCount % 10 === 0) {
+        setFps(Math.round(1000 / delta));
+      }
+      frameCount++;
+      
+      // Render scene
+      renderer.render(scene, camera);
       requestAnimationFrame(animate);
     };
     
-    // Update event listeners (remove pointer lock)
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mousedown', onMouseClick);
-    window.addEventListener('contextmenu', onContextMenu);
-    window.addEventListener('resize', onWindowResize);
-    
     animate();
     
-    // Add health bar to the player character
-    const playerHealthBarWidth = 1.5;
-    const playerHealthBarHeight = 0.15;
-    const playerHealthBarYOffset = 3;
-    const playerHealthBar = createHealthBar(playerHealthBarWidth, playerHealthBarHeight, character.position, playerHealthBarYOffset);
-    character.model.add(playerHealthBar);
-
-    // Function to update player health bar
-    const updatePlayerHealthBar = () => {
-      const healthPercent = character.health / character.maxHealth;
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', onWindowResize);
       
-      // Get canvas context
-      const context = playerHealthBar.userData.context as CanvasRenderingContext2D;
-      const canvas = playerHealthBar.userData.canvas as HTMLCanvasElement;
-      const texture = playerHealthBar.userData.texture as THREE.CanvasTexture;
-      
-      if (!context || !canvas || !texture) return;
-      
-      // Clear canvas
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw background (gray)
-      context.fillStyle = '#444444';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw health with color based on percentage
-      if (healthPercent > 0.6) {
-        context.fillStyle = '#00ff00'; // Green
-      } else if (healthPercent > 0.3) {
-        context.fillStyle = '#ffff00'; // Yellow
-      } else {
-        context.fillStyle = '#ff0000'; // Red
+      if (mountRef.current) {
+        mountRef.current.removeChild(renderer.domElement);
       }
-      
-      const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
-      context.fillRect(0, 0, healthWidth, canvas.height);
-      
-      // Update texture
-      texture.needsUpdate = true;
-      
-      // Make health bar always face camera
-      const sprite = playerHealthBar.userData.sprite as THREE.Sprite;
-      if (sprite) {
-        sprite.center.set(0.5, 0);
-      }
-      
-      // Update the state for UI, preserving the respawnTimer value
+      renderer.dispose();
+    };
+  }, []);
+  
+  // Handle player position change
+  const handlePlayerPositionChange = (position: THREE.Vector3) => {
+    setPlayerPos({ x: position.x, z: position.z });
+  };
+  
+  // Handle player health change
+  const handlePlayerHealthChange = (health: number, maxHealth: number) => {
+    setPlayerHealth({
+      current: health,
+      max: maxHealth,
+      respawnTimer: health <= 0 ? 5 : undefined
+    });
+  };
+  
+  // Handle player death
+  const handlePlayerDeath = () => {
+    // Start respawn timer
+    let timer = 5;
+    const interval = setInterval(() => {
+      timer--;
       setPlayerHealth(prev => ({
         ...prev,
-        current: character.health,
-        max: character.maxHealth
+        respawnTimer: timer
       }));
       
-      // Update ref for access in JSX
-      characterRef.current.health = character.health;
-    };
+      if (timer <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+  };
 
-    // Initialize player health bar
-    updatePlayerHealthBar();
-
-    // Add health to the central monument in each base
-    const addHealthToMonument = (base: THREE.Group & GameObjectWithHealth) => {
-      // Find the central objective (monument)
-      const objective = base.userData.objective as THREE.Mesh;
-      if (!objective) return;
-      
-      // Add health properties to the monument
-      objective.userData.health = 500;
-      objective.userData.maxHealth = 500;
-      objective.userData.isDestroyed = false;
-      objective.userData.attackCooldown = 0;
-      objective.userData.attackRange = 25; // Larger range than towers
-      objective.userData.damage = 30; // More damage than towers
-      objective.userData.team = base === basesRef.current.allyBase ? 'ally' : 'enemy';
-      
-      // Create health bar for the monument
-      const monumentHealthBarWidth = 4;
-      const monumentHealthBarHeight = 0.4;
-      const monumentHealthBarYOffset = 5; // Position above the monument
-      
-      const monumentHealthBar = createHealthBar(
-        monumentHealthBarWidth, 
-        monumentHealthBarHeight, 
-        new THREE.Vector3(0, 0, 0), 
-        monumentHealthBarYOffset
-      );
-      
-      objective.add(monumentHealthBar);
-      objective.userData.healthBar = monumentHealthBar;
-      
-      // Add update health bar method
-      objective.userData.updateHealthBar = () => {
-        const healthPercent = objective.userData.health / objective.userData.maxHealth;
-        
-        // Get canvas context
-        const context = monumentHealthBar.userData.context as CanvasRenderingContext2D;
-        const canvas = monumentHealthBar.userData.canvas as HTMLCanvasElement;
-        const texture = monumentHealthBar.userData.texture as THREE.CanvasTexture;
-        
-        if (!context || !canvas || !texture) return;
-        
-        // Clear canvas
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw background (gray)
-        context.fillStyle = '#444444';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw health with color based on percentage
-        if (healthPercent > 0.6) {
-          context.fillStyle = '#00ff00'; // Green
-        } else if (healthPercent > 0.3) {
-          context.fillStyle = '#ffff00'; // Yellow
-        } else {
-          context.fillStyle = '#ff0000'; // Red
-        }
-        
-        const healthWidth = Math.max(1, Math.floor(canvas.width * healthPercent));
-        context.fillRect(0, 0, healthWidth, canvas.height);
-        
-        // Update texture
-        texture.needsUpdate = true;
-        
-        // Make health bar always face camera
-        const sprite = monumentHealthBar.userData.sprite as THREE.Sprite;
-        if (sprite) {
-          sprite.center.set(0.5, 0);
-        }
-      };
-      
-      // Add take damage method
-      objective.userData.takeDamage = (amount: number) => {
-        if (objective.userData.isDestroyed) return;
-        
-        objective.userData.health -= amount;
-        if (objective.userData.health <= 0) {
-          objective.userData.health = 0;
-          objective.userData.isDestroyed = true;
-          
-          // Handle destruction visually
-          (objective.material as THREE.MeshStandardMaterial).color.set(0x555555);
-          (objective.material as THREE.MeshStandardMaterial).emissive.set(0x000000);
-          
-          // Update game state
-          if (objective.userData.team === 'ally') {
-            setGameState(prev => ({
-              ...prev,
-              gameOver: true,
-              winner: 'enemy'
-            }));
-          } else {
-            setGameState(prev => ({
-              ...prev,
-              gameOver: true,
-              winner: 'ally'
-            }));
-          }
-        }
-        
-        objective.userData.updateHealthBar();
-        
-        // Update UI state
-        if (objective.userData.team === 'ally') {
-          setMonumentHealth(prev => ({
-            ...prev,
-            ally: {
-              current: objective.userData.health,
-              max: objective.userData.maxHealth
-            }
-          }));
-        } else {
-          setMonumentHealth(prev => ({
-            ...prev,
-            enemy: {
-              current: objective.userData.health,
-              max: objective.userData.maxHealth
-            }
-          }));
-        }
-      };
-      
-      // Initialize health bar
-      objective.userData.updateHealthBar();
-    };
-    
-    // Add health to monuments after creating bases
-    addHealthToMonument(allyBase);
-    addHealthToMonument(enemyBase);
-
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mousedown', onMouseClick);
-      window.removeEventListener('contextmenu', onContextMenu);
-      window.removeEventListener('resize', onWindowResize);
-      mountRef.current?.removeChild(renderer.domElement);
-      window.removeEventListener('keydown', onKeyDown);
-      clearInterval(spawnInterval);
-      clearInterval(timerInterval);
-    };
-  }, [keyBindings, resetGame]);
-  
   return (
-    <div 
-      ref={mountRef} 
-      style={{ 
-        width: '100%', 
-        height: '100%',
-        cursor: 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'32\' height=\'32\' viewBox=\'0 0 32 32\'><circle cx=\'16\' cy=\'16\' r=\'8\' stroke=\'white\' stroke-width=\'2\' fill=\'none\'/><circle cx=\'16\' cy=\'16\' r=\'2\' fill=\'white\'/></svg>") 16 16, auto',
-        position: 'relative'
-      }}
-      onMouseDown={(e) => {
-        if (e.button === 2) { // Right click
-          e.currentTarget.style.cursor = 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'32\' height=\'32\' viewBox=\'0 0 32 32\'><circle cx=\'16\' cy=\'16\' r=\'8\' stroke=\'%23ffff00\' stroke-width=\'2\' fill=\'none\'/><circle cx=\'16\' cy=\'16\' r=\'2\' fill=\'%23ffff00\'/></svg>") 16 16, auto';
-        }
-      }}
-      onMouseUp={(e) => {
-        if (e.button === 2) { // Right click release
-          e.currentTarget.style.cursor = 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'32\' height=\'32\' viewBox=\'0 0 32 32\'><circle cx=\'16\' cy=\'16\' r=\'8\' stroke=\'white\' stroke-width=\'2\' fill=\'none\'/><circle cx=\'16\' cy=\'16\' r=\'2\' fill=\'white\'/></svg>") 16 16, auto';
-        }
-      }}
-    >
+    <div ref={mountRef} className="scene-container">
       {!isControlsEnabled && (
         <div style={{
           position: 'absolute',
@@ -2447,17 +592,6 @@ const BaseScene = () => {
           textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
         }}>
           FPS: {fps}
-        </div>
-        <div style={{
-          color: '#F7FF00',
-          fontSize: '16px',
-          fontFamily: 'monospace',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          padding: '8px 12px',
-          borderRadius: '8px',
-          textShadow: '1px 1px 1px rgba(0,0,0,0.5)'
-        }}>
-          Next Spawn: {nextSpawnTime}s
         </div>
       </div>
       
@@ -2711,6 +845,52 @@ const BaseScene = () => {
           </div>
         </div>
       </div>
+      
+      {/* Add MinionSpawner component */}
+      {sceneRef.current && (
+        <MinionSpawner
+          scene={sceneRef.current}
+          lanes={[
+            {
+              name: 'top',
+              allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 15, 0, -LANE_SQUARE_SIZE/2 + 15),
+              enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 15, 0, -LANE_SQUARE_SIZE/2 + 15)
+            },
+            {
+              name: 'mid',
+              allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 15, 0, LANE_SQUARE_SIZE/2 - 15),
+              enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 15, 0, -LANE_SQUARE_SIZE/2 + 15)
+            },
+            {
+              name: 'bottom',
+              allySpawn: new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 15, 0, LANE_SQUARE_SIZE/2 - 15),
+              enemySpawn: new THREE.Vector3(LANE_SQUARE_SIZE/2 - 15, 0, LANE_SQUARE_SIZE/2 - 15)
+            }
+          ]}
+          spawnInterval={30000}
+          minionsPerWave={4}
+          bases={basesRef.current}
+          gameOver={gameState.gameOver}
+          onMinionCountChange={(allyCount, enemyCount) => {
+            // You can use this to update UI or game state based on minion counts
+            console.log(`Minions: ${allyCount} allies, ${enemyCount} enemies`);
+          }}
+        />
+      )}
+      
+      {/* Player component */}
+      {sceneRef.current && cameraRef.current && (
+        <Player
+          scene={sceneRef.current}
+          camera={cameraRef.current}
+          initialPosition={new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5)}
+          playableArea={PLAYABLE_AREA}
+          onPositionChange={handlePlayerPositionChange}
+          onHealthChange={handlePlayerHealthChange}
+          onDeath={handlePlayerDeath}
+          // Pass obstacles like towers, bases, etc.
+        />
+      )}
     </div>
   );
 };
