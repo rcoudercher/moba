@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 import { createHealthBar } from '../../utils';
 import { GameObjectWithHealth } from '../../types/gameObjects';
+import positionRegistry, { TeamType } from '../../utils/PositionRegistry';
 
 // Tower interface
 export interface Tower extends THREE.Group, GameObjectWithHealth {
-  team: 'red' | 'blue';
+  team: TeamType;
   shootingRange: number;
   attackCooldown: number;
+  detectEnemies: () => void;
+  startDetection: () => void;
+  stopDetection: () => void;
 }
 
 /**
@@ -19,7 +23,7 @@ export interface Tower extends THREE.Group, GameObjectWithHealth {
  */
 export const createTower = (
   position: THREE.Vector3, 
-  team: 'red' | 'blue', 
+  team: TeamType, 
   initialHealth: number = 300,
   shootingRange: number = 15
 ): Tower => {
@@ -100,6 +104,8 @@ export const createTower = (
   
   // Store shooting range in userData for game logic
   tower.userData.shootingRange = shootingRange;
+  tower.userData.rangeIndicator = rangeIndicator;
+  tower.userData.detectionInterval = null;
   
   // Create and add health bar
   const healthBarWidth = 3;
@@ -157,6 +163,9 @@ export const createTower = (
       
       // Hide range indicator
       rangeIndicator.visible = false;
+      
+      // Stop detection
+      tower.stopDetection();
     }
     
     tower.updateHealthBar();
@@ -200,6 +209,56 @@ export const createTower = (
     const sprite = tower.healthBar.userData.sprite as THREE.Sprite;
     if (sprite) {
       sprite.center.set(0.5, 0);
+    }
+  };
+  
+  // Enemy detection method
+  tower.detectEnemies = () => {
+    if (!(rangeIndicator.material instanceof THREE.LineDashedMaterial)) {
+      return;
+    }
+    
+    // Get tower position
+    const towerPosition = tower.position.clone();
+    
+    // Query the position registry for entities in range
+    const enemiesInRange = positionRegistry.getEntitiesInRange(
+      towerPosition,
+      tower.shootingRange,
+      tower.team
+    );
+    
+    // Change range indicator color based on detection
+    if (enemiesInRange.length > 0) {
+      // Change to red when enemies detected
+      (rangeIndicator.material as THREE.LineDashedMaterial).color.set(0xff0000);
+      
+      // Log detection
+      console.log('Tower detected enemies:', enemiesInRange);
+      
+      // TODO: Attack logic would go here
+    } else {
+      // Change back to yellow when no enemies
+      (rangeIndicator.material as THREE.LineDashedMaterial).color.set(0xffff00);
+    }
+  };
+  
+  // Start detection interval
+  tower.startDetection = () => {
+    // Clear any existing interval
+    tower.stopDetection();
+    
+    // Start a new detection interval
+    tower.userData.detectionInterval = setInterval(() => {
+      tower.detectEnemies();
+    }, 500); // Check every 500ms
+  };
+  
+  // Stop detection interval
+  tower.stopDetection = () => {
+    if (tower.userData.detectionInterval) {
+      clearInterval(tower.userData.detectionInterval);
+      tower.userData.detectionInterval = null;
     }
   };
   

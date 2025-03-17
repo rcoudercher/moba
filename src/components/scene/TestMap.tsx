@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createTower } from './Tower';
+import { createTower, Tower } from './Tower';
 import Player, { PlayerProps } from './Player';
+import positionRegistry from '../../utils/PositionRegistry';
 
 const TestMap: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -12,7 +13,9 @@ const TestMap: React.FC = () => {
   const [sceneReady, setSceneReady] = useState(false);
   const [playerTeam, setPlayerTeam] = useState<'blue' | 'red'>('blue');
   const [towerTeam, setTowerTeam] = useState<'blue' | 'red'>('red');
-  const towerRef = useRef<THREE.Group | null>(null);
+  const [towerRange, setTowerRange] = useState<number>(15);
+  const towerRef = useRef<Tower | null>(null);
+  const playerIdRef = useRef<string>('player1');
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -126,6 +129,8 @@ const TestMap: React.FC = () => {
     
     // Remove existing tower if it exists
     if (towerRef.current) {
+      // Stop detection before removing
+      towerRef.current.stopDetection();
       sceneRef.current.remove(towerRef.current);
     }
     
@@ -134,17 +139,43 @@ const TestMap: React.FC = () => {
       new THREE.Vector3(0, 0, 0),  // Center of the map
       towerTeam,  // Use the tower team state
       1000,    // health
-      15       // shooting range
+      towerRange  // shooting range from state
     );
     sceneRef.current.add(tower);
     towerRef.current = tower;
     
+    // Start tower detection
+    tower.startDetection();
+    
     return () => {
       if (towerRef.current && sceneRef.current) {
+        // Stop detection before removing
+        towerRef.current.stopDetection();
         sceneRef.current.remove(towerRef.current);
       }
     };
-  }, [towerTeam]);
+  }, [towerTeam, towerRange]);
+
+  // Register player in position registry when team changes
+  useEffect(() => {
+    // Register player in position registry
+    positionRegistry.register(playerIdRef.current, {
+      position: new THREE.Vector3(0, 0, 30), // Initial position
+      team: playerTeam,
+      type: 'player',
+      health: 100,
+      maxHealth: 100,
+      isAlive: true
+    });
+    
+    // Debug: log all entities in registry
+    positionRegistry.debugLog();
+    
+    return () => {
+      // Remove player from registry when component unmounts or team changes
+      positionRegistry.remove(playerIdRef.current);
+    };
+  }, [playerTeam]);
 
   // Toggle player team
   const togglePlayerTeam = () => {
@@ -207,6 +238,20 @@ const TestMap: React.FC = () => {
             Switch to {towerTeam === 'blue' ? 'Red' : 'Blue'} Tower
           </button>
         </div>
+        
+        <div style={{ marginTop: '15px' }}>
+          <div style={{ marginBottom: '5px' }}>Tower Range: {towerRange}</div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <input 
+              type="range" 
+              min="5" 
+              max="30" 
+              value={towerRange} 
+              onChange={(e) => setTowerRange(parseInt(e.target.value))}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
       </div>
 
       {sceneReady && sceneRef.current && cameraRef.current && (
@@ -220,16 +265,57 @@ const TestMap: React.FC = () => {
             team={playerTeam}
             onPositionChange={(position) => {
               console.log('Player moved to:', position);
+              // Update player position in registry
+              positionRegistry.updatePosition(playerIdRef.current, position);
+              
+              // Tower detection is now handled by the tower itself
             }}
             onHealthChange={(health, maxHealth) => {
               console.log('Player health:', health, '/', maxHealth);
+              // Update player health in registry
+              positionRegistry.updateMetadata(playerIdRef.current, {
+                health,
+                maxHealth
+              });
             }}
             onDeath={() => {
               console.log('Player died');
+              // Update player alive status in registry
+              positionRegistry.updateMetadata(playerIdRef.current, {
+                isAlive: false
+              });
             }}
           />
         </>
       )}
+      
+      {/* Debug UI for position registry */}
+      <div style={{
+        position: 'absolute',
+        bottom: '20px',
+        left: '20px',
+        zIndex: 100,
+        background: 'rgba(0, 0, 0, 0.5)',
+        padding: '10px',
+        borderRadius: '5px',
+        color: 'white',
+        maxWidth: '300px',
+        fontSize: '12px'
+      }}>
+        <button 
+          onClick={() => positionRegistry.debugLog()}
+          style={{
+            padding: '5px 10px',
+            background: '#444',
+            color: 'white',
+            border: 'none',
+            borderRadius: '3px',
+            cursor: 'pointer'
+          }}
+        >
+          Log Registry
+        </button>
+      </div>
     </div>
   );
 };
