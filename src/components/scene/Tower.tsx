@@ -4,7 +4,7 @@ import { GameObjectWithHealth } from '../../types/gameObjects';
 
 // Tower interface
 export interface Tower extends THREE.Group, GameObjectWithHealth {
-  team: 'ally' | 'enemy';
+  team: 'red' | 'blue';
   shootingRange: number;
   attackCooldown: number;
 }
@@ -12,14 +12,16 @@ export interface Tower extends THREE.Group, GameObjectWithHealth {
 /**
  * Creates a tower with health, team affiliation, and shooting range
  * @param position - The position of the tower in the scene
- * @param isEnemy - Whether the tower belongs to the enemy team (red) or ally team (blue)
+ * @param team - The team the tower belongs to ('red' or 'blue')
  * @param initialHealth - The initial health of the tower (default: 300)
+ * @param shootingRange - The shooting range of the tower (default: 15)
  * @returns A Tower object with all necessary properties and methods
  */
 export const createTower = (
   position: THREE.Vector3, 
-  isEnemy: boolean, 
-  initialHealth: number = 300
+  team: 'red' | 'blue', 
+  initialHealth: number = 300,
+  shootingRange: number = 15
 ): Tower => {
   const tower = new THREE.Group() as Tower;
   
@@ -27,14 +29,14 @@ export const createTower = (
   tower.health = initialHealth;
   tower.maxHealth = initialHealth;
   tower.isDestroyed = false;
-  tower.team = isEnemy ? 'enemy' : 'ally';
-  tower.shootingRange = 15;
+  tower.team = team;
+  tower.shootingRange = shootingRange;
   tower.attackCooldown = 0;
   
   // Create tower base
   const baseGeometry = new THREE.CylinderGeometry(1.5, 2, 2, 8);
   const baseMaterial = new THREE.MeshStandardMaterial({ 
-    color: isEnemy ? 0xff0000 : 0x0000ff,
+    color: team === 'red' ? 0xff0000 : 0x0000ff,
     roughness: 0.7
   });
   const base = new THREE.Mesh(baseGeometry, baseMaterial);
@@ -46,7 +48,7 @@ export const createTower = (
   // Create tower middle section
   const middleGeometry = new THREE.CylinderGeometry(1.2, 1.5, 4, 8);
   const middleMaterial = new THREE.MeshStandardMaterial({ 
-    color: isEnemy ? 0xdd0000 : 0x0000dd,
+    color: team === 'red' ? 0xdd0000 : 0x0000dd,
     roughness: 0.6
   });
   const middle = new THREE.Mesh(middleGeometry, middleMaterial);
@@ -58,7 +60,7 @@ export const createTower = (
   // Create tower top
   const topGeometry = new THREE.CylinderGeometry(1.5, 1.2, 1, 8);
   const topMaterial = new THREE.MeshStandardMaterial({ 
-    color: isEnemy ? 0xbb0000 : 0x0000bb,
+    color: team === 'red' ? 0xbb0000 : 0x0000bb,
     roughness: 0.5
   });
   const top = new THREE.Mesh(topGeometry, topMaterial);
@@ -69,7 +71,6 @@ export const createTower = (
   
   // Create shooting range indicator (dotted yellow circle)
   const segments = 64;
-  const shootingRange = 15;
   
   // Create a circle geometry
   const rangeGeometry = new THREE.BufferGeometry();

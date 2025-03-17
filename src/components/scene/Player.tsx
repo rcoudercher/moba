@@ -6,6 +6,7 @@ export interface PlayerProps {
   camera: THREE.Camera;
   initialPosition: THREE.Vector3;
   playableArea: number;
+  team: 'red' | 'blue';
   onPositionChange?: (position: THREE.Vector3) => void;
   onHealthChange?: (health: number, maxHealth: number) => void;
   onDeath?: () => void;
@@ -27,6 +28,7 @@ const Player = ({
   camera,
   initialPosition,
   playableArea,
+  team,
   onPositionChange,
   onHealthChange,
   onDeath,
@@ -38,7 +40,11 @@ const Player = ({
   useEffect(() => {
     // Create player mesh
     const geometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
-    const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+    
+    // Set color based on team
+    const teamColor = team === 'red' ? 0xff0000 : 0x0000ff;
+    const material = new THREE.MeshStandardMaterial({ color: teamColor });
+    
     const playerMesh = new THREE.Mesh(geometry, material);
     playerMesh.castShadow = true;
     playerMesh.position.copy(initialPosition);
@@ -48,7 +54,7 @@ const Player = ({
     // Create target indicator
     const indicatorGeometry = new THREE.CircleGeometry(0.5, 16);
     const indicatorMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
+      color: teamColor,
       transparent: true,
       opacity: 0.7,
     });
@@ -306,7 +312,8 @@ const Player = ({
       // Visual feedback for damage
       player.mesh.material.color.set(0xff0000);
       setTimeout(() => {
-        player.mesh.material.color.set(0x00ff00);
+        // Reset to team color
+        player.mesh.material.color.set(teamColor);
       }, 200);
       
       // Check for death
@@ -336,7 +343,8 @@ const Player = ({
       // Visual feedback for healing
       player.mesh.material.color.set(0x00ffff);
       setTimeout(() => {
-        player.mesh.material.color.set(0x00ff00);
+        // Reset to team color
+        player.mesh.material.color.set(teamColor);
       }, 200);
     };
     

@@ -2,20 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createTower } from './Tower';
-
-interface Character {
-  model: THREE.Mesh;
-  position: THREE.Vector3;
-  direction: THREE.Vector3;
-  targetPosition: THREE.Vector3 | null;
-  speed: number;
-  health: number;
-  maxHealth: number;
-}
+import Player, { PlayerProps } from './Player';
 
 const TestMap: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isControlsEnabled, setIsControlsEnabled] = useState(true);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const [sceneReady, setSceneReady] = useState(false);
+  const [playerTeam, setPlayerTeam] = useState<'blue' | 'red'>('blue');
+  const [towerTeam, setTowerTeam] = useState<'blue' | 'red'>('red');
+  const towerRef = useRef<THREE.Group | null>(null);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -25,6 +22,7 @@ const TestMap: React.FC = () => {
 
     // Scene setup
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     scene.background = new THREE.Color(0x87ceeb);
 
     // Camera setup
@@ -34,6 +32,7 @@ const TestMap: React.FC = () => {
       0.1,
       1000
     );
+    cameraRef.current = camera;
     camera.position.set(0, 50, 50);
     camera.lookAt(0, 0, 0);
 
@@ -89,130 +88,8 @@ const TestMap: React.FC = () => {
     boundaryLines.position.y = 0.2; // Slightly above ground to be visible
     scene.add(boundaryLines);
 
-    // Add a tower in the center
-    const tower = createTower(
-      new THREE.Vector3(0, 0, 0),  // Center of the map
-      false,  // false = ally tower
-      1000    // health
-    );
-    scene.add(tower);
-
-    // Add player character
-    const playerGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 16);
-    const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff });
-    const playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
-    playerMesh.castShadow = true;
-    playerMesh.position.y = 1;
-    scene.add(playerMesh);
-
-    // Create character object
-    const character: Character = {
-      model: playerMesh,
-      position: new THREE.Vector3(0, 1, 10),
-      direction: new THREE.Vector3(0, 0, 0),
-      targetPosition: null,
-      speed: 0.15,
-      health: 100,
-      maxHealth: 100
-    };
-
-    // Update player position
-    playerMesh.position.copy(character.position);
-
-    // Create target indicator
-    const indicatorGeometry = new THREE.CircleGeometry(0.5, 16);
-    const indicatorMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0x00ff00,
-      transparent: true,
-      opacity: 0.7
-    });
-    const targetIndicator = new THREE.Mesh(indicatorGeometry, indicatorMaterial);
-    targetIndicator.rotation.x = -Math.PI / 2; // Lay flat on ground
-    targetIndicator.visible = false;
-    scene.add(targetIndicator);
-
-    // Right-click handler for movement
-    const onMouseClick = (event: MouseEvent) => {
-      if (event.button !== 2 || !isControlsEnabled) return; // Only handle right click
-      
-      event.preventDefault();
-      
-      // Create a raycaster
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2(
-        (event.clientX / window.innerWidth) * 2 - 1,
-        -(event.clientY / window.innerHeight) * 2 + 1
-      );
-      
-      raycaster.setFromCamera(mouse, camera);
-      
-      // Check intersection with the ground plane
-      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const intersectionPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
-      
-      // Clamp the target position within map boundaries
-      intersectionPoint.x = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, intersectionPoint.x));
-      intersectionPoint.z = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, intersectionPoint.z));
-      
-      // Set new target position
-      character.targetPosition = intersectionPoint;
-      
-      // Update target indicator position
-      targetIndicator.position.copy(intersectionPoint);
-      targetIndicator.position.y = 0.1; // Slightly above ground
-      targetIndicator.visible = true;
-      
-      setTimeout(() => {
-        targetIndicator.visible = false;
-      }, 1000);
-    };
-
-    // Prevent context menu on right click
-    const onContextMenu = (event: Event) => {
-      event.preventDefault();
-    };
-
-    // Update movement
-    const updateMovement = () => {
-      if (character.targetPosition) {
-        // Calculate direction to target
-        const direction = new THREE.Vector3()
-          .subVectors(character.targetPosition, character.position)
-          .setY(0);
-        
-        // Check if we're close enough to stop
-        if (direction.length() < 0.1) {
-          character.targetPosition = null;
-          character.direction.set(0, 0, 0);
-        } else {
-          // Normalize direction and set character movement
-          direction.normalize();
-          character.direction.copy(direction);
-          character.model.rotation.y = Math.atan2(direction.x, direction.z);
-        }
-      }
-      
-      // Calculate new position
-      const moveSpeed = character.speed;
-      const newX = character.position.x + character.direction.x * moveSpeed;
-      const newZ = character.position.z + character.direction.z * moveSpeed;
-      
-      // Create a new potential position
-      const newPosition = new THREE.Vector3(newX, character.position.y, newZ);
-      
-      // Check if new position is within map boundaries
-      if (
-        newPosition.x >= -MAP_SIZE/2 && 
-        newPosition.x <= MAP_SIZE/2 && 
-        newPosition.z >= -MAP_SIZE/2 && 
-        newPosition.z <= MAP_SIZE/2
-      ) {
-        // Update character position
-        character.position.copy(newPosition);
-        character.model.position.copy(character.position);
-      }
-    };
+    // Mark scene as ready
+    setSceneReady(true);
 
     // Handle window resize
     const handleResize = () => {
@@ -223,23 +100,19 @@ const TestMap: React.FC = () => {
 
     // Add event listeners
     window.addEventListener('resize', handleResize);
-    window.addEventListener('mousedown', onMouseClick);
-    window.addEventListener('contextmenu', onContextMenu);
 
     // Animation loop
     const animate = () => {
       requestAnimationFrame(animate);
       controls.update();
-      updateMovement();
       renderer.render(scene, camera);
     };
     animate();
 
     // Cleanup
     return () => {
+      setSceneReady(false);
       window.removeEventListener('resize', handleResize);
-      window.removeEventListener('mousedown', onMouseClick);
-      window.removeEventListener('contextmenu', onContextMenu);
       if (mountRef.current) {
         mountRef.current.removeChild(renderer.domElement);
       }
@@ -247,7 +120,118 @@ const TestMap: React.FC = () => {
     };
   }, [isControlsEnabled]);
 
-  return <div ref={mountRef} style={{ width: '100%', height: '100%' }} />;
+  // Separate effect for tower creation/update
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    
+    // Remove existing tower if it exists
+    if (towerRef.current) {
+      sceneRef.current.remove(towerRef.current);
+    }
+    
+    // Add a new tower with current team
+    const tower = createTower(
+      new THREE.Vector3(0, 0, 0),  // Center of the map
+      towerTeam,  // Use the tower team state
+      1000,    // health
+      15       // shooting range
+    );
+    sceneRef.current.add(tower);
+    towerRef.current = tower;
+    
+    return () => {
+      if (towerRef.current && sceneRef.current) {
+        sceneRef.current.remove(towerRef.current);
+      }
+    };
+  }, [towerTeam]);
+
+  // Toggle player team
+  const togglePlayerTeam = () => {
+    setPlayerTeam(prevTeam => prevTeam === 'blue' ? 'red' : 'blue');
+  };
+
+  // Toggle tower team
+  const toggleTowerTeam = () => {
+    setTowerTeam(prevTeam => prevTeam === 'blue' ? 'red' : 'blue');
+  };
+
+  return (
+    <div ref={mountRef} style={{ width: '100%', height: '100%' }}>
+      {/* Team toggle UI */}
+      <div style={{
+        position: 'absolute',
+        top: '20px',
+        left: '20px',
+        zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        background: 'rgba(0, 0, 0, 0.5)',
+        padding: '15px',
+        borderRadius: '5px',
+        color: 'white'
+      }}>
+        <div>
+          <div style={{ marginBottom: '5px' }}>Player Team: {playerTeam}</div>
+          <button 
+            onClick={togglePlayerTeam}
+            style={{
+              padding: '8px 16px',
+              background: playerTeam === 'blue' ? '#0066ff' : '#ff3333',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            Switch to {playerTeam === 'blue' ? 'Red' : 'Blue'} Team
+          </button>
+        </div>
+        
+        <div style={{ marginTop: '15px' }}>
+          <div style={{ marginBottom: '5px' }}>Tower Team: {towerTeam}</div>
+          <button 
+            onClick={toggleTowerTeam}
+            style={{
+              padding: '8px 16px',
+              background: towerTeam === 'blue' ? '#0066ff' : '#ff3333',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            Switch to {towerTeam === 'blue' ? 'Red' : 'Blue'} Tower
+          </button>
+        </div>
+      </div>
+
+      {sceneReady && sceneRef.current && cameraRef.current && (
+        <>
+          {/* Player */}
+          <Player
+            scene={sceneRef.current}
+            camera={cameraRef.current}
+            initialPosition={new THREE.Vector3(0, 0, 30)}
+            playableArea={100}
+            team={playerTeam}
+            onPositionChange={(position) => {
+              console.log('Player moved to:', position);
+            }}
+            onHealthChange={(health, maxHealth) => {
+              console.log('Player health:', health, '/', maxHealth);
+            }}
+            onDeath={() => {
+              console.log('Player died');
+            }}
+          />
+        </>
+      )}
+    </div>
+  );
 };
 
 export default TestMap; 

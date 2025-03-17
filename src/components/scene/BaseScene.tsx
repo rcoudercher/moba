@@ -10,7 +10,7 @@ import { createBase, createHealthBar } from '../../utils';
 import { MinionSpawner, MinionType } from './mobile';
 import { GameObjectWithHealth } from '../../types/gameObjects';
 
-const BaseScene = () => {
+export default function BaseScene() {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.Camera | null>(null);
@@ -885,6 +885,7 @@ const BaseScene = () => {
           camera={cameraRef.current}
           initialPosition={new THREE.Vector3(-LANE_SQUARE_SIZE/2 + 5, 0, LANE_SQUARE_SIZE/2 - 5)}
           playableArea={PLAYABLE_AREA}
+          team="red"
           onPositionChange={handlePlayerPositionChange}
           onHealthChange={handlePlayerHealthChange}
           onDeath={handlePlayerDeath}
@@ -893,6 +894,4 @@ const BaseScene = () => {
       )}
     </div>
   );
-};
-
-export default BaseScene; 
+}
