@@ -5,17 +5,22 @@ interface LogDisplayProps {
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'left';
   maxHeight?: string;
   width?: string;
-  title?: string;
+  maxLogs?: number;
 }
 
 const LogDisplay: React.FC<LogDisplayProps> = ({
   position = 'left',
   maxHeight = '400px',
   width = '300px',
-  title = 'Game Logs'
+  maxLogs = 5
 }) => {
-  const { state, clearLogs } = useLogStore();
+  const { state } = useLogStore();
   const { logs } = state;
+
+  // Get the latest logs, limited by maxLogs
+  const latestLogs = [...logs]
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, maxLogs);
 
   // Position styles
   const getPositionStyle = () => {
@@ -39,15 +44,15 @@ const LogDisplay: React.FC<LogDisplayProps> = ({
   const getLogTypeColor = (type?: 'info' | 'warning' | 'error' | 'success') => {
     switch (type) {
       case 'info':
-        return '#3498db';
+        return 'white';
       case 'warning':
-        return '#f39c12';
+        return 'orange';
       case 'error':
-        return '#e74c3c';
+        return 'red';
       case 'success':
-        return '#2ecc71';
+        return 'white';
       default:
-        return '#3498db';
+        return 'white';
     }
   };
 
@@ -65,67 +70,29 @@ const LogDisplay: React.FC<LogDisplayProps> = ({
       color: 'white',
       width,
       maxHeight,
-      overflowY: 'auto',
-      display: 'flex',
-      flexDirection: 'column'
+      overflowY: 'auto'
     }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        margin: '0 0 10px 0', 
-        borderBottom: '1px solid #555', 
-        paddingBottom: '5px',
-        order: isBottomPosition ? '1' : '0'
-      }}>
-        <h3 style={{ margin: 0 }}>{title}</h3>
-        <button 
-          onClick={clearLogs}
-          style={{
-            background: 'rgba(255, 255, 255, 0.2)',
-            border: 'none',
-            color: 'white',
-            padding: '3px 8px',
-            borderRadius: '3px',
-            cursor: 'pointer',
-            fontSize: '12px'
-          }}
-        >
-          Clear
-        </button>
-      </div>
-      
-      <div style={{ 
-        order: isBottomPosition ? '0' : '1',
-        display: 'flex',
-        flexDirection: 'column',
-        flexGrow: 1
-      }}>
-        {logs.length === 0 ? (
-          <div style={{ color: '#888', fontStyle: 'italic' }}>No logs yet...</div>
-        ) : (
-          <div style={{ 
-            display: 'flex',
-            flexDirection: isBottomPosition ? 'column-reverse' : 'column'
-          }}>
-            {logs.map((log, index) => (
-              <div key={index} style={{ 
-                marginBottom: '5px', 
-                padding: '5px', 
-                borderBottom: '1px solid #333',
+      {latestLogs.length === 0 ? (
+        <div style={{ color: '#888', fontStyle: 'italic' }}>No logs yet...</div>
+      ) : (
+        <div style={{ 
+          display: 'flex',
+          flexDirection: 'column'
+        }}>
+          {latestLogs.map((log, index) => (
+            <div 
+              key={index} 
+              style={{ 
+                marginBottom: '3px',
                 fontSize: '12px',
-                borderLeft: `3px solid ${getLogTypeColor(log.type)}`,
-                paddingLeft: '8px'
-              }}>
-                <div style={{ color: '#aaa', fontSize: '10px' }}>
-                  {log.timestamp.toLocaleTimeString()}
-                </div>
-                <div>{log.message}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                color: getLogTypeColor(log.type)
+              }}
+            >
+              [{log.timestamp.toLocaleTimeString()}] {log.message}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
